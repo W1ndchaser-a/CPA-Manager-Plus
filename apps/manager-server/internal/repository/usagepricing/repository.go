@@ -500,6 +500,30 @@ func StructureRevision(ctx context.Context, db RowQuerier) (string, error) {
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
+	windowRows, err := db.QueryContext(ctx, `select model, days_mask, start_hour, end_hour
+		from model_price_peak_windows order by model, start_hour, end_hour, days_mask`)
+	if err != nil {
+		return "", err
+	}
+	defer windowRows.Close()
+	for windowRows.Next() {
+		var modelID string
+		var daysMask int
+		var window model.ModelPricePeakWindow
+		if err := windowRows.Scan(&modelID, &daysMask, &window.StartHour, &window.EndHour); err != nil {
+			return "", err
+		}
+		window.Days = model.PeakWindowDaysFromMask(daysMask)
+		price, ok := prices[modelID]
+		if !ok {
+			continue
+		}
+		price.PeakWindows = append(price.PeakWindows, window)
+		prices[modelID] = price
+	}
+	if err := windowRows.Err(); err != nil {
+		return "", err
+	}
 	return usageidentity.PricingStructureRevision(model.ModelPriceStructureRevision(prices)), nil
 }
 

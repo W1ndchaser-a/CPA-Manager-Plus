@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyCandidatePrice,
   buildPriceFromDraft,
+  formatPeakWindow,
   buildModelPriceRows,
   buildModelPriceSummary,
   buildSyncPriceModelsFromSummary,
@@ -354,5 +355,31 @@ describe('modelPricesPageModel', () => {
         completion: 30,
       }
     );
+  });
+
+  it('keeps peak windows when a price row is edited and saved', () => {
+    const peakWindows = [{ days: [1, 2, 3, 4, 5], startHour: 1, endHour: 4 }];
+    const price = {
+      prompt: 0.15,
+      completion: 0.6,
+      cache: 0.003,
+      promptConfigured: true,
+      completionConfigured: true,
+      serviceTiers: [
+        {
+          mode: 'peak',
+          serviceTier: 'peak',
+          prompt: 0.3,
+          completion: 1.2,
+          cache: 0.006,
+          promptConfigured: true,
+          completionConfigured: true,
+        },
+      ],
+      peakWindows,
+    };
+    const saved = buildPriceFromDraft(createPriceDraft('m', price));
+    expect(saved?.peakWindows).toEqual(peakWindows);
+    expect(formatPeakWindow(peakWindows[0])).toBe('Mon-Fri 01-04 UTC');
   });
 });

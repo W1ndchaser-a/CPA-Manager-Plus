@@ -32,6 +32,7 @@ import {
   filterModelPriceRows,
   formatContextThreshold,
   formatPriceUnit,
+  formatPeakWindow,
   formatServiceTierRule,
   getModelPriceCandidateIdentity,
   groupModelPriceCandidatesBySource,
@@ -733,6 +734,13 @@ export function ModelPricesPage() {
                                 </span>
                               );
                             })}
+                            {(row.price?.peakWindows ?? []).length > 0 ? (
+                              <span className={styles.tierBadge}>
+                                <small>
+                                  {(row.price?.peakWindows ?? []).map(formatPeakWindow).join(' · ')}
+                                </small>
+                              </span>
+                            ) : null}
                           </div>
                         ) : (
                           <span className={styles.sourcePlaceholder}>--</span>
