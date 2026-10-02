@@ -631,3 +631,20 @@ func BenchmarkCostForModelWithExplicitServiceTier(b *testing.B) {
 		b.Fatal("cost = 0")
 	}
 }
+
+func TestPeakServiceTierUsesPeakRates(t *testing.T) {
+	prices := map[string]model.ModelPrice{"deepseek-v4.1-flash": {
+		Prompt: 0.15, Completion: 0.6, Cache: 0.003, CacheRead: 0.003,
+		PromptConfigured: true, CompletionConfigured: true, CacheReadConfigured: true,
+		ServiceTiers: []model.ModelPriceServiceTier{{
+			Mode: "peak", ServiceTier: "peak", Prompt: 0.3, Completion: 1.2, CacheRead: 0.006,
+			PromptConfigured: true, CompletionConfigured: true, CacheReadConfigured: true,
+		}},
+	}}
+	tokens := ModelTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+	base := CostForModelWithServiceTier("deepseek-v4.1-flash", "auto", tokens, prices)
+	peak := CostForModelWithServiceTier("deepseek-v4.1-flash", model.ModelPriceServiceTierPeak, tokens, prices)
+	if base < 0.7499 || base > 0.7501 || peak < 1.4999 || peak > 1.5001 {
+		t.Fatalf("base = %v, peak = %v; want 0.75 and 1.5", base, peak)
+	}
+}

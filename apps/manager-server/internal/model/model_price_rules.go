@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -53,6 +54,20 @@ type ModelPriceServiceTier struct {
 	CacheConfigured         bool    `json:"cacheConfigured,omitempty"`
 	CacheReadConfigured     bool    `json:"cacheReadConfigured,omitempty"`
 	CacheCreationConfigured bool    `json:"cacheCreationConfigured,omitempty"`
+}
+
+// ModelPriceServiceTierPeak is the service tier that usage events receive when
+// they fall inside one of a model's PeakWindows. Its rates come from the
+// matching ModelPriceServiceTier rule (mode and serviceTier both "peak").
+const ModelPriceServiceTierPeak = "peak"
+
+// ModelPricePeakWindow is a recurring UTC time-of-day window billed at the
+// peak service tier. Days lists weekdays (0 = Sunday .. 6 = Saturday); the
+// window covers StartHour <= hour < EndHour, so EndHour may be 24.
+type ModelPricePeakWindow struct {
+	Days      []int `json:"days"`
+	StartHour int   `json:"startHour"`
+	EndHour   int   `json:"endHour"`
 }
 
 // NormalizeModelPriceContextTiers validates and returns a threshold-sorted
@@ -275,6 +290,19 @@ func ModelPriceStructureRevision(prices map[string]ModelPrice) string {
 			binary.BigEndian.PutUint64(encoded[:], uint64(tier.ThresholdTokens))
 			_, _ = hash.Write(encoded[:])
 		}
+		// Windows are hashed only when configured so books without them keep
+		// their existing revision and do not trigger a rollup rebuild.
+		if windows, err := NormalizeModelPricePeakWindows(prices[modelID].PeakWindows); err == nil && len(windows) > 0 {
+			_, _ = hash.Write([]byte("peak-v1"))
+			for _, window := range windows {
+				binary.BigEndian.PutUint64(encoded[:], uint64(PeakWindowDaysMask(window.Days)))
+				_, _ = hash.Write(encoded[:])
+				binary.BigEndian.PutUint64(encoded[:], uint64(window.StartHour))
+				_, _ = hash.Write(encoded[:])
+				binary.BigEndian.PutUint64(encoded[:], uint64(window.EndHour))
+				_, _ = hash.Write(encoded[:])
+			}
+		}
 	}
 	return modelPriceStructureRevisionVersion + ":" + hex.EncodeToString(hash.Sum(nil))
 }
@@ -298,9 +326,97 @@ func ValidateModelPrice(modelID string, price ModelPrice) error {
 	if err != nil {
 		return fmt.Errorf("invalid model price for %s: %w", modelID, err)
 	}
+	windows, err := NormalizeModelPricePeakWindows(price.PeakWindows)
+	if err != nil {
+		return fmt.Errorf("invalid model price for %s: %w", modelID, err)
+	}
+	if len(windows) > 0 {
+		if _, ok := SelectModelPriceServiceTier(price, ModelPriceServiceTierPeak); !ok {
+			return fmt.Errorf("invalid model price for %s: peak windows require a %q service tier rule", modelID, ModelPriceServiceTierPeak)
+		}
+	}
 	return nil
 }
 
 func validModelPriceRuleValue(value float64) bool {
 	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+// NormalizeModelPricePeakWindows validates windows and returns a sorted copy
+// with sorted, de-duplicated weekdays.
+func NormalizeModelPricePeakWindows(windows []ModelPricePeakWindow) ([]ModelPricePeakWindow, error) {
+	if len(windows) == 0 {
+		return nil, nil
+	}
+	normalized := make([]ModelPricePeakWindow, 0, len(windows))
+	for _, window := range windows {
+		if window.StartHour < 0 || window.EndHour > 24 || window.StartHour >= window.EndHour {
+			return nil, fmt.Errorf("invalid peak window hours: %d-%d", window.StartHour, window.EndHour)
+		}
+		if len(window.Days) == 0 {
+			return nil, errors.New("peak window requires at least one weekday")
+		}
+		seen := make(map[int]bool, len(window.Days))
+		days := make([]int, 0, len(window.Days))
+		for _, day := range window.Days {
+			if day < 0 || day > 6 {
+				return nil, fmt.Errorf("invalid peak window weekday: %d", day)
+			}
+			if !seen[day] {
+				seen[day] = true
+				days = append(days, day)
+			}
+		}
+		sort.Ints(days)
+		normalized = append(normalized, ModelPricePeakWindow{Days: days, StartHour: window.StartHour, EndHour: window.EndHour})
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		if normalized[i].StartHour != normalized[j].StartHour {
+			return normalized[i].StartHour < normalized[j].StartHour
+		}
+		return normalized[i].EndHour < normalized[j].EndHour
+	})
+	return normalized, nil
+}
+
+// PeakWindowDaysMask packs weekdays into a bitmask (bit n = weekday n).
+func PeakWindowDaysMask(days []int) int {
+	mask := 0
+	for _, day := range days {
+		if day >= 0 && day <= 6 {
+			mask |= 1 << day
+		}
+	}
+	return mask
+}
+
+// PeakWindowDaysFromMask is the inverse of PeakWindowDaysMask.
+func PeakWindowDaysFromMask(mask int) []int {
+	days := make([]int, 0, 7)
+	for day := 0; day <= 6; day++ {
+		if mask&(1<<day) != 0 {
+			days = append(days, day)
+		}
+	}
+	return days
+}
+
+// InPeakWindow reports whether the UTC instant falls inside any window.
+func InPeakWindow(windows []ModelPricePeakWindow, timestampMS int64) bool {
+	if len(windows) == 0 || timestampMS <= 0 {
+		return false
+	}
+	at := time.UnixMilli(timestampMS).UTC()
+	weekday, hour := int(at.Weekday()), at.Hour()
+	for _, window := range windows {
+		if hour < window.StartHour || hour >= window.EndHour {
+			continue
+		}
+		for _, day := range window.Days {
+			if day == weekday {
+				return true
+			}
+		}
+	}
+	return false
 }

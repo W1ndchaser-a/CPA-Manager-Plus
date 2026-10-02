@@ -215,6 +215,35 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 	if err := serviceTierRows.Close(); err != nil {
 		return nil, err
 	}
+
+	windowRows, err := tx.QueryContext(ctx, `select model, days_mask, start_hour, end_hour
+		from model_price_peak_windows order by model, start_hour, end_hour, days_mask`)
+	if err != nil {
+		return nil, err
+	}
+	for windowRows.Next() {
+		var modelID string
+		var daysMask int
+		var window model.ModelPricePeakWindow
+		if err := windowRows.Scan(&modelID, &daysMask, &window.StartHour, &window.EndHour); err != nil {
+			_ = windowRows.Close()
+			return nil, err
+		}
+		window.Days = model.PeakWindowDaysFromMask(daysMask)
+		price, ok := prices[modelID]
+		if !ok {
+			continue
+		}
+		price.PeakWindows = append(price.PeakWindows, window)
+		prices[modelID] = price
+	}
+	if err := windowRows.Err(); err != nil {
+		_ = windowRows.Close()
+		return nil, err
+	}
+	if err := windowRows.Close(); err != nil {
+		return nil, err
+	}
 	return prices, nil
 }
 
@@ -245,6 +274,10 @@ func (r *repository) ReplaceAll(ctx context.Context, prices map[string]model.Mod
 		if err != nil {
 			return err
 		}
+		price.PeakWindows, err = model.NormalizeModelPricePeakWindows(price.PeakWindows)
+		if err != nil {
+			return err
+		}
 		normalizedPrices[modelID] = price
 	}
 
@@ -259,6 +292,9 @@ func (r *repository) ReplaceAll(ctx context.Context, prices map[string]model.Mod
 		}
 	}
 
+	if _, err := tx.ExecContext(ctx, `delete from model_price_peak_windows`); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `delete from model_price_service_tiers`); err != nil {
 		return err
 	}
@@ -291,6 +327,11 @@ func (r *repository) ReplaceAll(ctx context.Context, prices map[string]model.Mod
 		return err
 	}
 	defer serviceTierStmt.Close()
+	windowStmt, err := preparePeakWindowInsert(ctx, tx)
+	if err != nil {
+		return err
+	}
+	defer windowStmt.Close()
 
 	now := time.Now().UnixMilli()
 	for modelID, price := range normalizedPrices {
@@ -318,6 +359,9 @@ func (r *repository) ReplaceAll(ctx context.Context, prices map[string]model.Mod
 			return err
 		}
 		if err := insertServiceTiers(ctx, serviceTierStmt, modelID, price.ServiceTiers); err != nil {
+			return err
+		}
+		if err := insertPeakWindows(ctx, windowStmt, modelID, price.PeakWindows); err != nil {
 			return err
 		}
 	}
@@ -386,6 +430,16 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 		return model.ModelPriceSyncResult{}, err
 	}
 	defer serviceTierStmt.Close()
+	deleteWindowStmt, err := tx.PrepareContext(ctx, `delete from model_price_peak_windows where model = ?`)
+	if err != nil {
+		return model.ModelPriceSyncResult{}, err
+	}
+	defer deleteWindowStmt.Close()
+	windowStmt, err := preparePeakWindowInsert(ctx, tx)
+	if err != nil {
+		return model.ModelPriceSyncResult{}, err
+	}
+	defer windowStmt.Close()
 
 	now := time.Now().UnixMilli()
 	result := model.ModelPriceSyncResult{}
@@ -400,6 +454,11 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 			continue
 		}
 		price.ServiceTiers, err = model.NormalizeModelPriceServiceTiers(price.ServiceTiers)
+		if err != nil {
+			result.Skipped++
+			continue
+		}
+		price.PeakWindows, err = model.NormalizeModelPricePeakWindows(price.PeakWindows)
 		if err != nil {
 			result.Skipped++
 			continue
@@ -453,6 +512,12 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 		if err := insertServiceTiers(ctx, serviceTierStmt, modelID, price.ServiceTiers); err != nil {
 			return model.ModelPriceSyncResult{}, err
 		}
+		if _, err := deleteWindowStmt.ExecContext(ctx, modelID); err != nil {
+			return model.ModelPriceSyncResult{}, err
+		}
+		if err := insertPeakWindows(ctx, windowStmt, modelID, price.PeakWindows); err != nil {
+			return model.ModelPriceSyncResult{}, err
+		}
 		result.Imported++
 	}
 	afterPrices, err := r.LoadAllTx(ctx, tx)
@@ -500,6 +565,21 @@ func insertContextTiers(ctx context.Context, stmt *sql.Stmt, modelID string, tie
 			tier.CacheReadConfigured,
 			tier.CacheCreationConfigured,
 		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func preparePeakWindowInsert(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
+	return tx.PrepareContext(ctx, `insert into model_price_peak_windows (
+		model, days_mask, start_hour, end_hour
+	) values (?, ?, ?, ?)`)
+}
+
+func insertPeakWindows(ctx context.Context, stmt *sql.Stmt, modelID string, windows []model.ModelPricePeakWindow) error {
+	for _, window := range windows {
+		if _, err := stmt.ExecContext(ctx, modelID, model.PeakWindowDaysMask(window.Days), window.StartHour, window.EndHour); err != nil {
 			return err
 		}
 	}
