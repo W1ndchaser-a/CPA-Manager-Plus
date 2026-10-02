@@ -772,6 +772,14 @@ func Migrate(db *sql.DB) error {
 			primary key (model, mode, service_tier),
 			foreign key (model) references model_prices(model) on delete cascade
 		)`,
+		`create table if not exists model_price_peak_windows (
+			model text not null,
+			days_mask integer not null,
+			start_hour integer not null,
+			end_hour integer not null,
+			primary key (model, days_mask, start_hour, end_hour),
+			foreign key (model) references model_prices(model) on delete cascade
+		)`,
 		`create table if not exists api_key_aliases (
 			api_key_hash text primary key,
 			alias text not null,
