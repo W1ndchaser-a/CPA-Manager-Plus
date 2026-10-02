@@ -676,3 +676,56 @@ func TestModelPriceUpsertSyncedPreservesRetainedVerifierSystemError(t *testing.T
 		t.Fatal("model-b should not exist after verifier system error")
 	}
 }
+
+func TestPeakWindowsPersistAndRoundTrip(t *testing.T) {
+	_, repo := openTestDB(t)
+	ctx := context.Background()
+	price := model.ModelPrice{
+		Prompt: 0.15, Completion: 0.6, Cache: 0.003,
+		PromptConfigured: true, CompletionConfigured: true,
+		ServiceTiers: []model.ModelPriceServiceTier{{
+			Mode: "peak", ServiceTier: "peak", Prompt: 0.3, Completion: 1.2, Cache: 0.006,
+			PromptConfigured: true, CompletionConfigured: true, CacheConfigured: true,
+		}},
+		PeakWindows: []model.ModelPricePeakWindow{
+			{Days: []int{5, 1, 2, 3, 4}, StartHour: 6, EndHour: 10},
+			{Days: []int{1, 2, 3, 4, 5}, StartHour: 1, EndHour: 4},
+		},
+	}
+	if err := repo.ReplaceAll(ctx, map[string]model.ModelPrice{"deepseek-v4.1-flash": price}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	loaded, err := repo.LoadAll(ctx)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	windows := loaded["deepseek-v4.1-flash"].PeakWindows
+	if len(windows) != 2 || windows[0].StartHour != 1 || windows[1].StartHour != 6 || len(windows[0].Days) != 5 || windows[0].Days[0] != 1 {
+		t.Fatalf("unexpected windows after round trip: %#v", windows)
+	}
+
+	// Replacing without windows clears them.
+	price.PeakWindows = nil
+	price.ServiceTiers = nil
+	if err := repo.ReplaceAll(ctx, map[string]model.ModelPrice{"deepseek-v4.1-flash": price}); err != nil {
+		t.Fatalf("replace without windows: %v", err)
+	}
+	loaded, err = repo.LoadAll(ctx)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(loaded["deepseek-v4.1-flash"].PeakWindows) != 0 {
+		t.Fatalf("windows not cleared: %#v", loaded["deepseek-v4.1-flash"].PeakWindows)
+	}
+}
+
+func TestReplaceAllRejectsPeakWindowsWithoutPeakTier(t *testing.T) {
+	_, repo := openTestDB(t)
+	err := repo.ReplaceAll(context.Background(), map[string]model.ModelPrice{"m": {
+		Prompt: 1, Completion: 2,
+		PeakWindows: []model.ModelPricePeakWindow{{Days: []int{1}, StartHour: 1, EndHour: 4}},
+	}})
+	if err == nil {
+		t.Fatal("expected rejection")
+	}
+}
