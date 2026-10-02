@@ -1,4 +1,9 @@
-import type { ModelPrice, ModelPriceContextTier, ModelPriceServiceTier } from '@/utils/usage';
+import type {
+  ModelPrice,
+  ModelPriceContextTier,
+  ModelPricePeakWindow,
+  ModelPriceServiceTier,
+} from '@/utils/usage';
 import type {
   ModelPriceUsageSummaryResponse,
   ModelPriceSyncCandidate,
@@ -33,6 +38,8 @@ export type PriceDraft = {
   cacheCreation: string;
   contextTiers: ContextTierDraft[];
   serviceTiers: ServiceTierDraft[];
+  /** Not editable in the UI yet; carried through so saving a row keeps its windows. */
+  peakWindows?: ModelPricePeakWindow[];
 };
 
 export type PriceDraftValidationError =
@@ -74,6 +81,7 @@ export const createEmptyPriceDraft = (): PriceDraft => ({
   cacheCreation: '',
   contextTiers: [],
   serviceTiers: [],
+  peakWindows: [],
 });
 
 const createConfiguredDraftValue = (value: number | undefined, configured?: boolean): string =>
@@ -126,6 +134,7 @@ export const createPriceDraft = (model: string, price?: ModelPrice): PriceDraft 
     serviceTier: tier.serviceTier,
     ...createRulePriceDraft(tier),
   })),
+  peakWindows: price?.peakWindows ?? [],
 });
 
 export const parsePriceValue = (value: string) => {
@@ -223,6 +232,7 @@ export const buildPriceFromDraft = (draft: PriceDraft): ModelPrice | null => {
         (left, right) =>
           left.mode.localeCompare(right.mode) || left.serviceTier.localeCompare(right.serviceTier)
       ),
+    peakWindows: draft.peakWindows?.length ? draft.peakWindows : undefined,
   };
 };
 
@@ -386,6 +396,20 @@ export const resolveServiceTierDisplayPrice = (
   prompt: tier.promptConfigured ? tier.prompt : price?.prompt,
   completion: tier.completionConfigured ? tier.completion : price?.completion,
 });
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export const formatPeakWindow = (window: ModelPricePeakWindow) => {
+  const hours = `${String(window.startHour).padStart(2, '0')}-${String(window.endHour).padStart(2, '0')}`;
+  const days = window.days.join(',');
+  const label =
+    days === '1,2,3,4,5'
+      ? 'Mon-Fri'
+      : days === '0,1,2,3,4,5,6'
+        ? 'Daily'
+        : window.days.map((day) => WEEKDAY_LABELS[day]).join(',');
+  return `${label} ${hours} UTC`;
+};
 
 export const formatServiceTierRule = (tier: ModelPriceServiceTier) => {
   const mode = tier.mode.trim();

@@ -355,6 +355,10 @@ func (r *repository) InsertBatch(ctx context.Context, events []model.UsageEvent)
 	}
 
 	// Phase 4: Prepare non-duplicate events OUTSIDE write transaction
+	peaks, err := loadPeakBook(ctx, r.db)
+	if err != nil {
+		return model.InsertResult{}, err
+	}
 	preparedList := make([]preparedUsageEvent, 0, len(candidates))
 	for _, c := range candidates {
 		if c.isDuplicate {
@@ -363,6 +367,9 @@ func (r *repository) InsertBatch(ctx context.Context, events []model.UsageEvent)
 		prepared, err := r.prepareUsageEvent(c.event)
 		if err != nil {
 			return model.InsertResult{}, err
+		}
+		if !prepared.event.PreserveArchiveDerivedFields {
+			prepared.event.ServiceTier = peaks.peakServiceTier(prepared.event)
 		}
 		preparedList = append(preparedList, prepared)
 	}

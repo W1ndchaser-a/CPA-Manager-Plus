@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/model"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usagepricing"
 	sqliterepo "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/sqlite"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/testutil"
@@ -674,4 +676,30 @@ func pricingAccountKey(authFileSnapshot, authIndex string) string {
 		panic("invalid pricing test identity")
 	}
 	return key
+}
+
+func TestStructureRevisionChangesWithPeakWindows(t *testing.T) {
+	db, err := sqliterepo.Open(filepath.Join(t.TempDir(), "usage.sqlite"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `insert into model_prices (model, prompt_per_1m, completion_per_1m, cache_per_1m, updated_at_ms) values ('m', 1, 2, 0.1, 1)`); err != nil {
+		t.Fatalf("seed price: %v", err)
+	}
+	before, err := usagepricing.StructureRevision(ctx, db)
+	if err != nil {
+		t.Fatalf("revision: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `insert into model_price_peak_windows (model, days_mask, start_hour, end_hour) values ('m', 62, 1, 4)`); err != nil {
+		t.Fatalf("seed window: %v", err)
+	}
+	after, err := usagepricing.StructureRevision(ctx, db)
+	if err != nil {
+		t.Fatalf("revision: %v", err)
+	}
+	if before == after {
+		t.Fatal("adding a peak window must change the pricing structure revision so rollups rebuild")
+	}
 }

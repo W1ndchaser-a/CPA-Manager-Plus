@@ -15,6 +15,7 @@ type ModelPrice struct {
 	RawJSON                 string                  `json:"rawJson,omitempty"`
 	ContextTiers            []ModelPriceContextTier `json:"contextTiers,omitempty"`
 	ServiceTiers            []ModelPriceServiceTier `json:"serviceTiers,omitempty"`
+	PeakWindows             []ModelPricePeakWindow  `json:"peakWindows,omitempty"`
 	UpdatedAtMS             int64                   `json:"updatedAtMs,omitempty"`
 	SyncedAtMS              *int64                  `json:"syncedAtMs,omitempty"`
 }
