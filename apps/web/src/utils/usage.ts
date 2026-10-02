@@ -37,6 +37,13 @@ export interface ModelPriceServiceTier {
   cacheCreationConfigured?: boolean;
 }
 
+/** Recurring UTC window (weekdays 0=Sun..6=Sat, StartHour <= hour < EndHour) billed at the "peak" service tier. */
+export interface ModelPricePeakWindow {
+  days: number[];
+  startHour: number;
+  endHour: number;
+}
+
 export interface ModelPrice {
   prompt: number;
   completion: number;
@@ -52,6 +59,7 @@ export interface ModelPrice {
   rawJson?: string;
   contextTiers?: ModelPriceContextTier[];
   serviceTiers?: ModelPriceServiceTier[];
+  peakWindows?: ModelPricePeakWindow[];
   updatedAtMs?: number;
   syncedAtMs?: number;
 }
@@ -1435,6 +1443,30 @@ function normalizeContextTiers(value: unknown): ModelPriceContextTier[] | undefi
   return tiers.sort((left, right) => left.thresholdTokens - right.thresholdTokens);
 }
 
+function normalizePeakWindows(value: unknown): ModelPricePeakWindow[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const windows: ModelPricePeakWindow[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || !Array.isArray(item.days)) return undefined;
+    const startHour = Number(item.startHour);
+    const endHour = Number(item.endHour);
+    const days = item.days.map(Number);
+    if (
+      !Number.isInteger(startHour) ||
+      !Number.isInteger(endHour) ||
+      startHour < 0 ||
+      endHour > 24 ||
+      startHour >= endHour ||
+      days.length === 0 ||
+      days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)
+    ) {
+      return undefined;
+    }
+    windows.push({ days: [...new Set(days)].sort((a, b) => a - b), startHour, endHour });
+  }
+  return windows.length > 0 ? windows : undefined;
+}
+
 function normalizeServiceTiers(value: unknown): ModelPriceServiceTier[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const tiers: ModelPriceServiceTier[] = [];
@@ -1531,6 +1563,7 @@ export function loadModelPrices(): Record<string, ModelPrice> {
         rawJson: readDetailString(price.rawJson),
         contextTiers: normalizeContextTiers(price.contextTiers),
         serviceTiers: normalizeServiceTiers(price.serviceTiers),
+        peakWindows: normalizePeakWindows(price.peakWindows),
         updatedAtMs: toPositiveNumber(price.updatedAtMs),
         syncedAtMs: toPositiveNumber(price.syncedAtMs),
       };
