@@ -833,6 +833,14 @@ export interface DashboardTodaySummary {
   reasoning_tokens: number;
   total_tokens: number;
   total_cost: number;
+  cost_complete?: boolean;
+  incomplete_cost_calls?: number;
+  image_input_tokens?: number;
+  image_cache_read_tokens?: number;
+  image_output_tokens?: number;
+  cache_creation_1h_tokens?: number;
+  image_tokens_known?: boolean;
+  cache_creation_ttl_known?: boolean;
   average_latency_ms: number | null;
   zero_token_calls: number;
 }
@@ -1115,6 +1123,8 @@ export interface MonitoringAccountHistoryItem {
   failure_calls: number;
   total_tokens: number;
   total_cost: number | null;
+  cost_complete?: boolean;
+  incomplete_cost_calls?: number;
   success_rate: number | null;
   first_seen_ms: number | null;
   last_seen_ms: number | null;
@@ -1496,6 +1506,14 @@ export interface MonitoringAnalyticsSummary {
   reasoning_tokens: number;
   total_tokens: number;
   total_cost: number;
+  cost_complete?: boolean;
+  incomplete_cost_calls?: number;
+  image_input_tokens?: number;
+  image_cache_read_tokens?: number;
+  image_output_tokens?: number;
+  cache_creation_1h_tokens?: number;
+  image_tokens_known?: boolean;
+  cache_creation_ttl_known?: boolean;
   average_cost_per_call?: number;
   average_latency_ms: number | null;
   p95_latency_ms?: number | null;

@@ -427,13 +427,15 @@ func (r *repository) InsertBatch(ctx context.Context, events []model.UsageEvent)
 		account_snapshot, auth_label_snapshot, auth_file_snapshot, auth_provider_snapshot, auth_account_id_snapshot, auth_project_id_snapshot, auth_snapshot_at_ms,
 		requested_model, resolved_model, reasoning_effort, service_tier, request_service_tier, response_service_tier, cache_input_mode,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens,
+		image_input_tokens, image_cache_read_tokens, image_output_tokens, cache_creation_1h_tokens,
+		image_tokens_known, cache_creation_ttl_known,
 		normalized_uncached_input_tokens, normalized_total_input_tokens, normalized_cache_read_tokens, normalized_cache_creation_tokens, total_tokens,
 		latency_ms, ttft_ms, failed, fail_status_code, fail_summary,
 		response_metadata_json, header_quota_recover_at_ms, header_quota_used_percent, header_quota_plan_type, header_error_kind, header_error_code, header_trace_id,
 		fail_body, raw_json,
 		response_model, session_id, parent_session_id, access_token_sha256, generate, stream,
 		created_at_ms
-		) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return model.InsertResult{}, err
 	}
@@ -499,6 +501,12 @@ func (r *repository) InsertBatch(ctx context.Context, events []model.UsageEvent)
 			ev.CacheTokens,
 			ev.CacheReadTokens,
 			ev.CacheCreationTokens,
+			ev.ImageInputTokens,
+			ev.ImageCacheReadTokens,
+			ev.ImageOutputTokens,
+			ev.CacheCreation1hTokens,
+			boolToInt(ev.ImageTokensKnown),
+			boolToInt(ev.CacheCreationTTLKnown),
 			ev.NormalizedUncachedInputTokens,
 			ev.NormalizedTotalInputTokens,
 			ev.NormalizedCacheReadTokens,
@@ -580,6 +588,8 @@ func (r *repository) ListRecent(ctx context.Context, limit int) ([]model.UsageEv
 		account_snapshot, auth_label_snapshot, auth_file_snapshot, auth_provider_snapshot, auth_account_id_snapshot, auth_project_id_snapshot, auth_snapshot_at_ms,
 		requested_model, resolved_model, reasoning_effort, service_tier, request_service_tier, response_service_tier, cache_input_mode,
 		input_tokens, output_tokens, reasoning_tokens, cached_tokens, cache_tokens, cache_read_tokens, cache_creation_tokens,
+		image_input_tokens, image_cache_read_tokens, image_output_tokens, cache_creation_1h_tokens,
+		image_tokens_known, cache_creation_ttl_known,
 		normalized_uncached_input_tokens, normalized_total_input_tokens, normalized_cache_read_tokens, normalized_cache_creation_tokens, total_tokens,
 		latency_ms, ttft_ms, failed, fail_status_code, fail_summary,
 		coalesce(response_metadata_json, ''), header_quota_recover_at_ms, header_quota_used_percent, coalesce(header_quota_plan_type, ''), coalesce(header_error_kind, ''), coalesce(header_error_code, ''), coalesce(header_trace_id, ''),
@@ -607,6 +617,7 @@ func (r *repository) ListRecent(ctx context.Context, limit int) ([]model.UsageEv
 		var quotaRecoverAt sql.NullInt64
 		var quotaUsedPercent sql.NullFloat64
 		var normalizedUncachedInput, normalizedTotalInput, normalizedCacheRead, normalizedCacheCreation sql.NullInt64
+		var imageKnown, ttlKnown int
 		var failed int
 		if err := rows.Scan(
 			&requestID,
@@ -648,6 +659,12 @@ func (r *repository) ListRecent(ctx context.Context, limit int) ([]model.UsageEv
 			&event.CacheTokens,
 			&event.CacheReadTokens,
 			&event.CacheCreationTokens,
+			&event.ImageInputTokens,
+			&event.ImageCacheReadTokens,
+			&event.ImageOutputTokens,
+			&event.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&normalizedUncachedInput,
 			&normalizedTotalInput,
 			&normalizedCacheRead,
@@ -676,6 +693,8 @@ func (r *repository) ListRecent(ctx context.Context, limit int) ([]model.UsageEv
 		); err != nil {
 			return nil, err
 		}
+		event.ImageTokensKnown = imageKnown != 0
+		event.CacheCreationTTLKnown = ttlKnown != 0
 		event.RequestID = requestID.String
 		event.AnalyticsModel = usageidentity.AnalyticsModelForRequest(event.Model, requestedModel.String)
 		event.Provider = provider.String
@@ -857,4 +876,11 @@ func responseHeaderDerivedForInsert(event model.UsageEvent) (string, int64, *flo
 		traceID = derived.TraceID
 	}
 	return metadataJSON, quotaRecoverAtMS, quotaUsedPercent, quotaPlanType, errorKind, errorCode, traceID
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

@@ -2022,6 +2022,12 @@ const archiveRecordExpression = `json_patch(
 			'cache_tokens', e.cache_tokens,
 			'cache_read_tokens', e.cache_read_tokens,
 			'cache_creation_tokens', e.cache_creation_tokens,
+			'image_input_tokens', coalesce(e.image_input_tokens, 0),
+			'image_cache_read_tokens', coalesce(e.image_cache_read_tokens, 0),
+			'image_output_tokens', coalesce(e.image_output_tokens, 0),
+			'cache_creation_1h_tokens', coalesce(e.cache_creation_1h_tokens, 0),
+			'image_tokens_known', case when coalesce(e.image_tokens_known, 0) != 0 then json('true') else json('false') end,
+			'cache_creation_ttl_known', case when coalesce(e.cache_creation_ttl_known, 0) != 0 then json('true') else json('false') end,
 			'normalized_uncached_input_tokens', coalesce(e.normalized_uncached_input_tokens, 0),
 			'normalized_total_input_tokens', coalesce(e.normalized_total_input_tokens, 0),
 			'normalized_cache_read_tokens', coalesce(e.normalized_cache_read_tokens, 0)

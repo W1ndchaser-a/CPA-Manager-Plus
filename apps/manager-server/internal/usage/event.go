@@ -17,25 +17,25 @@ import (
 )
 
 type Event struct {
-	RequestID      string `json:"request_id,omitempty"`
-	EventHash      string `json:"event_hash"`
-	TimestampMS    int64  `json:"timestamp_ms"`
-	Timestamp      string `json:"timestamp"`
-	Provider       string `json:"provider,omitempty"`
-	ExecutorType   string `json:"executor_type,omitempty"`
-	Model          string `json:"model"`
-	AnalyticsModel string `json:"analytics_model,omitempty"`
-	RequestedModel string `json:"requested_model,omitempty"`
-	ResolvedModel  string `json:"resolved_model,omitempty"`
-	ResponseModel  string `json:"response_model,omitempty"`
-	SessionID      string `json:"session_id,omitempty"`
-	ParentSessionID string `json:"parent_session_id,omitempty"`
+	RequestID         string `json:"request_id,omitempty"`
+	EventHash         string `json:"event_hash"`
+	TimestampMS       int64  `json:"timestamp_ms"`
+	Timestamp         string `json:"timestamp"`
+	Provider          string `json:"provider,omitempty"`
+	ExecutorType      string `json:"executor_type,omitempty"`
+	Model             string `json:"model"`
+	AnalyticsModel    string `json:"analytics_model,omitempty"`
+	RequestedModel    string `json:"requested_model,omitempty"`
+	ResolvedModel     string `json:"resolved_model,omitempty"`
+	ResponseModel     string `json:"response_model,omitempty"`
+	SessionID         string `json:"session_id,omitempty"`
+	ParentSessionID   string `json:"parent_session_id,omitempty"`
 	AccessTokenSHA256 string `json:"access_token_sha256,omitempty"`
-	Generate       *bool  `json:"generate,omitempty"`
-	Stream         *bool  `json:"stream,omitempty"`
-	Endpoint       string `json:"endpoint,omitempty"`
-	Method         string `json:"method,omitempty"`
-	Path           string `json:"path,omitempty"`
+	Generate          *bool  `json:"generate,omitempty"`
+	Stream            *bool  `json:"stream,omitempty"`
+	Endpoint          string `json:"endpoint,omitempty"`
+	Method            string `json:"method,omitempty"`
+	Path              string `json:"path,omitempty"`
 	// Downstream request metadata is available only to authenticated monitoring
 	// APIs. Compatible usage payloads and JSONL exports intentionally omit it.
 	ClientIP              string `json:"-"`
@@ -67,6 +67,7 @@ type Event struct {
 	CacheTokens         int64  `json:"cache_tokens"`
 	CacheReadTokens     int64  `json:"cache_read_tokens"`
 	CacheCreationTokens int64  `json:"cache_creation_tokens"`
+	BillingTokenDetails
 	// Normalized token buckets are persisted for aggregation and billing but are
 	// not exposed in compatible usage payloads.
 	NormalizedUncachedInputTokens int64 `json:"-"`
@@ -106,7 +107,16 @@ type Tokens struct {
 	CacheTokens         int64 `json:"cache_tokens"`
 	CacheReadTokens     int64 `json:"cache_read_tokens"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens"`
-	TotalTokens         int64 `json:"total_tokens"`
+	BillingTokenDetails
+	TotalTokens int64 `json:"total_tokens"`
+}
+type BillingTokenDetails struct {
+	ImageInputTokens      int64 `json:"image_input_tokens"`
+	ImageCacheReadTokens  int64 `json:"image_cache_read_tokens"`
+	ImageOutputTokens     int64 `json:"image_output_tokens"`
+	CacheCreation1hTokens int64 `json:"cache_creation_1h_tokens"`
+	ImageTokensKnown      bool  `json:"image_tokens_known"`
+	CacheCreationTTLKnown bool  `json:"cache_creation_ttl_known"`
 }
 
 // LongContextTokens preserves the portions of token aggregates that came from
@@ -191,11 +201,11 @@ type Payload struct {
 }
 
 const (
-	maxFailSummaryBytes            = 4096
-	maxClientIPBytes               = 64
-	maxXForwardedForBytes          = 2048
-	maxUserAgentBytes              = 1024
-	LongContextInputTokenThreshold = int64(272_000)
+	maxFailSummaryBytes                        = 4096
+	maxClientIPBytes                           = 64
+	maxXForwardedForBytes                      = 2048
+	maxUserAgentBytes                          = 1024
+	LongContextInputTokenThreshold             = int64(272_000)
 	CacheInputModeIncluded                     = "included_in_input"
 	CacheInputModeSeparate                     = "separate_from_input"
 	CacheInputModeReadIncludedCreationSeparate = "read_included_creation_separate"
@@ -582,6 +592,7 @@ func NormalizeRaw(raw []byte) (Event, error) {
 	}
 
 	inputTokens, outputTokens, reasoningTokens, cachedTokens, cacheTokens, cacheReadTokens, cacheCreationTokens, totalTokens := readTokenFields(record)
+	billingDetails := readBillingTokenDetails(record)
 
 	latencyMS := readOptionalInt(record, "latency_ms", "latencyMs", "duration_ms", "durationMs", "elapsed_ms", "elapsedMs")
 	ttftMS := readOptionalInt(record, "ttft_ms", "ttftMs", "time_to_first_token_ms", "timeToFirstTokenMs")
@@ -677,6 +688,7 @@ func NormalizeRaw(raw []byte) (Event, error) {
 		CacheTokens:                   cacheTokens,
 		CacheReadTokens:               cacheReadTokens,
 		CacheCreationTokens:           cacheCreationTokens,
+		BillingTokenDetails:           billingDetails,
 		NormalizedUncachedInputTokens: cacheAccounting.UncachedInputTokens,
 		NormalizedTotalInputTokens:    cacheAccounting.TotalInputTokens,
 		NormalizedCacheReadTokens:     cacheAccounting.CacheReadTokens,
@@ -780,6 +792,7 @@ func BuildPayload(events []Event) Payload {
 				CacheTokens:         compatCachedTokens,
 				CacheReadTokens:     event.CacheReadTokens,
 				CacheCreationTokens: event.CacheCreationTokens,
+				BillingTokenDetails: event.BillingTokenDetails,
 				TotalTokens:         event.TotalTokens,
 			},
 		})
@@ -852,6 +865,60 @@ func readNestedThenTopInt(record map[string]any, keys []string) int64 {
 		}
 	}
 	return readFirstIntFrom(record, keys...)
+}
+func readBillingTokenDetails(record map[string]any) BillingTokenDetails {
+	var details BillingTokenDetails
+	details.ImageInputTokens = readNestedThenTopInt(record, []string{
+		"image_input_tokens",
+		"imageInputTokens",
+	})
+	details.ImageCacheReadTokens = readNestedThenTopInt(record, []string{
+		"image_cache_read_tokens",
+		"imageCacheReadTokens",
+	})
+	details.ImageOutputTokens = readNestedThenTopInt(record, []string{
+		"image_output_tokens",
+		"imageOutputTokens",
+	})
+	details.CacheCreation1hTokens = readNestedThenTopInt(record, []string{
+		"cache_creation_1h_tokens",
+		"cacheCreation1hTokens",
+		"cache_creation_1h_input_tokens",
+		"cacheCreation1hInputTokens",
+	})
+
+	imageKnown := readNestedThenTopOptionalBool(record, []string{
+		"image_tokens_known",
+		"imageTokensKnown",
+	})
+	if imageKnown != nil {
+		details.ImageTokensKnown = *imageKnown
+	} else if details.ImageInputTokens > 0 || details.ImageCacheReadTokens > 0 || details.ImageOutputTokens > 0 {
+		details.ImageTokensKnown = true
+	}
+
+	ttlKnown := readNestedThenTopOptionalBool(record, []string{
+		"cache_creation_ttl_known",
+		"cacheCreationTTLKnown",
+	})
+	if ttlKnown != nil {
+		details.CacheCreationTTLKnown = *ttlKnown
+	} else if details.CacheCreation1hTokens > 0 {
+		details.CacheCreationTTLKnown = true
+	}
+
+	return details
+}
+
+func readNestedThenTopOptionalBool(record map[string]any, keys []string) *bool {
+	for _, parent := range []string{"tokens", "usage"} {
+		if nested, ok := record[parent].(map[string]any); ok {
+			if value := readOptionalBool(nested, keys...); value != nil {
+				return value
+			}
+		}
+	}
+	return readOptionalBool(record, keys...)
 }
 
 func readFailed(record map[string]any) bool {

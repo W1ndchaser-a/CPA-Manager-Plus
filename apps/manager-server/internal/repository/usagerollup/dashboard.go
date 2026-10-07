@@ -15,6 +15,7 @@ const dashboardHourMS int64 = 60 * 60 * 1000
 
 type DashboardHourlyRow struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	BucketMS            int64
 	Model               string
 	BillingModel        string
@@ -51,21 +52,27 @@ const (
 )
 
 type dashboardEventRow struct {
-	ID                  int64
-	TimestampMS         int64
-	Model               string
-	BillingModel        string
-	ServiceTier         string
-	Failed              bool
-	InputTokens         int64
-	OutputTokens        int64
-	ReasoningTokens     int64
-	CachedTokens        int64
-	CacheTokens         int64
-	CacheReadTokens     int64
-	CacheCreationTokens int64
-	TotalTokens         int64
-	LatencyMS           sql.NullInt64
+	ID                    int64
+	TimestampMS           int64
+	Model                 string
+	BillingModel          string
+	ServiceTier           string
+	Failed                bool
+	InputTokens           int64
+	OutputTokens          int64
+	ReasoningTokens       int64
+	CachedTokens          int64
+	CacheTokens           int64
+	CacheReadTokens       int64
+	CacheCreationTokens   int64
+	ImageInputTokens      int64
+	ImageCacheReadTokens  int64
+	ImageOutputTokens     int64
+	CacheCreation1hTokens int64
+	ImageTokensKnown      bool
+	CacheCreationTTLKnown bool
+	TotalTokens           int64
+	LatencyMS             sql.NullInt64
 }
 
 func (r *repository) CatchUpDashboardHourly(ctx context.Context, limit int, nowMS int64) (CatchUpResult, error) {
@@ -241,6 +248,12 @@ func mergeStoredDashboardRows(
 		sum(long_cached_tokens),
 		sum(long_cache_read_tokens),
 		sum(long_cache_creation_tokens),
+		sum(image_input_tokens),
+		sum(image_cache_read_tokens),
+		sum(image_output_tokens),
+		sum(cache_creation_1h_tokens),
+		min(image_tokens_known),
+		min(cache_creation_ttl_known),
 		sum(total_tokens),
 		sum(latency_sum_ms),
 		sum(latency_samples),
@@ -295,6 +308,12 @@ func mergeRawDashboardRows(
 		coalesce(sum(case when %s > %d then %s else 0 end), 0),
 		coalesce(sum(case when %s > %d then coalesce(e.cache_read_tokens, 0) else 0 end), 0),
 		coalesce(sum(case when %s > %d then coalesce(e.cache_creation_tokens, 0) else 0 end), 0),
+		coalesce(sum(coalesce(e.image_input_tokens, 0)), 0),
+		coalesce(sum(coalesce(e.image_cache_read_tokens, 0)), 0),
+		coalesce(sum(coalesce(e.image_output_tokens, 0)), 0),
+		coalesce(sum(coalesce(e.cache_creation_1h_tokens, 0)), 0),
+		coalesce(min(coalesce(e.image_tokens_known, 0)), 0),
+		coalesce(min(coalesce(e.cache_creation_ttl_known, 0)), 0),
 		coalesce(sum(coalesce(e.total_tokens, 0)), 0),
 		coalesce(sum(case when e.latency_ms is not null and e.latency_ms <> 0 then e.latency_ms else 0 end), 0),
 		count(nullif(e.latency_ms, 0)),
@@ -357,6 +376,7 @@ func rawDashboardBucketExpression(projection dashboardProjection, fromMS int64) 
 func scanAndMergeDashboardRows(rows *sql.Rows, grouped map[dashboardHourlyKey]*DashboardHourlyRow) error {
 	for rows.Next() {
 		var row DashboardHourlyRow
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.BucketMS,
 			&row.Model,
@@ -376,6 +396,12 @@ func scanAndMergeDashboardRows(rows *sql.Rows, grouped map[dashboardHourlyKey]*D
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.LatencySumMS,
 			&row.LatencySamples,
@@ -384,6 +410,8 @@ func scanAndMergeDashboardRows(rows *sql.Rows, grouped map[dashboardHourlyKey]*D
 		); err != nil {
 			return err
 		}
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		mergeDashboardRow(grouped, row)
 	}
 	return rows.Err()
@@ -416,6 +444,12 @@ func mergeDashboardRow(grouped map[dashboardHourlyKey]*DashboardHourlyRow, row D
 	entry.LongCachedTokens += row.LongCachedTokens
 	entry.LongCacheReadTokens += row.LongCacheReadTokens
 	entry.LongCacheCreationTokens += row.LongCacheCreationTokens
+	entry.ImageInputTokens += row.ImageInputTokens
+	entry.ImageCacheReadTokens += row.ImageCacheReadTokens
+	entry.ImageOutputTokens += row.ImageOutputTokens
+	entry.CacheCreation1hTokens += row.CacheCreation1hTokens
+	entry.ImageTokensKnown = entry.ImageTokensKnown && row.ImageTokensKnown
+	entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	entry.TotalTokens += row.TotalTokens
 	entry.LatencySumMS += row.LatencySumMS
 	entry.LatencySamples += row.LatencySamples
@@ -461,6 +495,12 @@ func dashboardEventsAfterCheckpoint(ctx context.Context, tx *sql.Tx, lastEventID
 	coalesce(cache_tokens, 0),
 	coalesce(cache_read_tokens, 0),
 	coalesce(cache_creation_tokens, 0),
+	coalesce(image_input_tokens, 0),
+	coalesce(image_cache_read_tokens, 0),
+	coalesce(image_output_tokens, 0),
+	coalesce(cache_creation_1h_tokens, 0),
+	coalesce(image_tokens_known, 0),
+	coalesce(cache_creation_ttl_known, 0),
 	coalesce(total_tokens, 0),
 	latency_ms
 from usage_events
@@ -476,6 +516,7 @@ limit ?`, lastEventID, targetEventID, limit)
 	for rows.Next() {
 		var event dashboardEventRow
 		var failed int
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&event.ID,
 			&event.TimestampMS,
@@ -490,12 +531,20 @@ limit ?`, lastEventID, targetEventID, limit)
 			&event.CacheTokens,
 			&event.CacheReadTokens,
 			&event.CacheCreationTokens,
+			&event.ImageInputTokens,
+			&event.ImageCacheReadTokens,
+			&event.ImageOutputTokens,
+			&event.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&event.TotalTokens,
 			&event.LatencyMS,
 		); err != nil {
 			return nil, err
 		}
 		event.Failed = failed != 0
+		event.ImageTokensKnown = imageKnown != 0
+		event.CacheCreationTTLKnown = ttlKnown != 0
 		event.CachedTokens = usage.CompatibleCachedTokens(
 			event.CachedTokens,
 			event.CacheTokens,
@@ -529,6 +578,10 @@ func aggregateDashboardHourly(events []dashboardEventRow, nowMS int64) []Dashboa
 				BillingModel: key.BillingModel,
 				ServiceTier:  key.ServiceTier,
 				UpdatedAtMS:  nowMS,
+				BillingTokenDetails: usage.BillingTokenDetails{
+					ImageTokensKnown:      true,
+					CacheCreationTTLKnown: true,
+				},
 			}
 			grouped[key] = row
 		}
@@ -548,6 +601,12 @@ func aggregateDashboardHourly(events []dashboardEventRow, nowMS int64) []Dashboa
 		row.CacheReadTokens += event.CacheReadTokens
 		row.CacheCreationTokens += event.CacheCreationTokens
 		row.AddIfLongContext(event.InputTokens, event.OutputTokens, event.CachedTokens, event.CacheReadTokens, event.CacheCreationTokens)
+		row.ImageInputTokens += event.ImageInputTokens
+		row.ImageCacheReadTokens += event.ImageCacheReadTokens
+		row.ImageOutputTokens += event.ImageOutputTokens
+		row.CacheCreation1hTokens += event.CacheCreation1hTokens
+		row.ImageTokensKnown = row.ImageTokensKnown && event.ImageTokensKnown
+		row.CacheCreationTTLKnown = row.CacheCreationTTLKnown && event.CacheCreationTTLKnown
 		row.TotalTokens += event.TotalTokens
 		if event.LatencyMS.Valid && event.LatencyMS.Int64 != 0 {
 			row.LatencySumMS += event.LatencyMS.Int64
@@ -585,12 +644,18 @@ func upsertDashboardHourlyRows(ctx context.Context, tx *sql.Tx, rows []Dashboard
 	long_cached_tokens,
 	long_cache_read_tokens,
 	long_cache_creation_tokens,
+	image_input_tokens,
+	image_cache_read_tokens,
+	image_output_tokens,
+	cache_creation_1h_tokens,
+	image_tokens_known,
+	cache_creation_ttl_known,
 	total_tokens,
 	latency_sum_ms,
 	latency_samples,
 	zero_token_calls,
 	updated_at_ms
-) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(bucket_ms, model, billing_model, service_tier) do update set
 	calls = usage_dashboard_hourly_rollups.calls + excluded.calls,
 	success_calls = usage_dashboard_hourly_rollups.success_calls + excluded.success_calls,
@@ -606,6 +671,12 @@ on conflict(bucket_ms, model, billing_model, service_tier) do update set
 	long_cached_tokens = usage_dashboard_hourly_rollups.long_cached_tokens + excluded.long_cached_tokens,
 	long_cache_read_tokens = usage_dashboard_hourly_rollups.long_cache_read_tokens + excluded.long_cache_read_tokens,
 	long_cache_creation_tokens = usage_dashboard_hourly_rollups.long_cache_creation_tokens + excluded.long_cache_creation_tokens,
+	image_input_tokens = usage_dashboard_hourly_rollups.image_input_tokens + excluded.image_input_tokens,
+	image_cache_read_tokens = usage_dashboard_hourly_rollups.image_cache_read_tokens + excluded.image_cache_read_tokens,
+	image_output_tokens = usage_dashboard_hourly_rollups.image_output_tokens + excluded.image_output_tokens,
+	cache_creation_1h_tokens = usage_dashboard_hourly_rollups.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
+	image_tokens_known = min(usage_dashboard_hourly_rollups.image_tokens_known, excluded.image_tokens_known),
+	cache_creation_ttl_known = min(usage_dashboard_hourly_rollups.cache_creation_ttl_known, excluded.cache_creation_ttl_known),
 	total_tokens = usage_dashboard_hourly_rollups.total_tokens + excluded.total_tokens,
 	latency_sum_ms = usage_dashboard_hourly_rollups.latency_sum_ms + excluded.latency_sum_ms,
 	latency_samples = usage_dashboard_hourly_rollups.latency_samples + excluded.latency_samples,
@@ -637,6 +708,12 @@ on conflict(bucket_ms, model, billing_model, service_tier) do update set
 			row.LongCachedTokens,
 			row.LongCacheReadTokens,
 			row.LongCacheCreationTokens,
+			row.ImageInputTokens,
+			row.ImageCacheReadTokens,
+			row.ImageOutputTokens,
+			row.CacheCreation1hTokens,
+			boolToInt(row.ImageTokensKnown),
+			boolToInt(row.CacheCreationTTLKnown),
 			row.TotalTokens,
 			row.LatencySumMS,
 			row.LatencySamples,
