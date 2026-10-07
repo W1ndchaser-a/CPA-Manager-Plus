@@ -431,7 +431,6 @@ func TestCostForGPT56KeepsExactly272KAtStandardRates(t *testing.T) {
 	}
 }
 
-
 func TestCostForGPT56RespectsExplicitZeroPrices(t *testing.T) {
 	prices := map[string]model.ModelPrice{
 		"gpt-5.6-sol": {
@@ -449,7 +448,6 @@ func TestCostForGPT56RespectsExplicitZeroPrices(t *testing.T) {
 		t.Fatalf("explicit-zero cost = %v, want 0", cost)
 	}
 }
-
 
 func TestCostForModelCandidatesKeepsResolvedNonGPTBehavior(t *testing.T) {
 	prices := map[string]model.ModelPrice{
@@ -875,5 +873,37 @@ func TestCanonicalAndPrefixedModelResolution(t *testing.T) {
 		if !res.Complete {
 			t.Fatalf("model %s should resolve to complete price", tc.modelName)
 		}
+	}
+}
+
+func TestReasoningOutputUsesReportedTotalsWithoutDoubleCharging(t *testing.T) {
+	prices := map[string]model.ModelPrice{
+		"gemini-3.1-flash-image": {
+			Prompt: 0.5, Completion: 3, ImageCompletion: 60,
+			PromptConfigured: true, CompletionConfigured: true, ImageCompletionConfigured: true,
+		},
+	}
+	for _, tc := range []struct {
+		name                                   string
+		input, output, reasoning, total, image int64
+		want                                   float64
+	}{
+		{"separate thoughts", 100, 1300, 20, 1420, 1120, 0.06785},
+		{"thoughts already included", 100, 1320, 20, 1420, 1120, 0.06785},
+		{"mixed protocol aggregate", 200, 2620, 40, 2840, 2240, 0.1357},
+		{"missing reported total", 100, 1300, 20, 0, 1120, 0.06779},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := CalculateCostForModel("gemini-3.1-flash-image", "default", ModelTokens{
+				InputTokens: tc.input, OutputTokens: tc.output, ReasoningTokens: tc.reasoning,
+				TotalTokens: tc.total, ImageOutputTokens: tc.image, ImageTokensKnown: true,
+			}, prices)
+			if math.Abs(result.Cost-tc.want) > 1e-10 {
+				t.Fatalf("cost = %.10f, want %.10f", result.Cost, tc.want)
+			}
+			if result.Complete != (tc.total > 0) {
+				t.Fatalf("complete = %v for reported total %d", result.Complete, tc.total)
+			}
+		})
 	}
 }
