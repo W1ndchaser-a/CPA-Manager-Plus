@@ -54,20 +54,26 @@ type Window struct {
 }
 
 type TodaySummary struct {
-	TotalCalls          int64    `json:"total_calls"`
-	SuccessCalls        int64    `json:"success_calls"`
-	FailureCalls        int64    `json:"failure_calls"`
-	SuccessRate         float64  `json:"success_rate"`
-	InputTokens         int64    `json:"input_tokens"`
-	OutputTokens        int64    `json:"output_tokens"`
-	CachedTokens        int64    `json:"cached_tokens"`
-	CacheReadTokens     int64    `json:"cache_read_tokens"`
-	CacheCreationTokens int64    `json:"cache_creation_tokens"`
-	ReasoningTokens     int64    `json:"reasoning_tokens"`
-	TotalTokens         int64    `json:"total_tokens"`
-	TotalCost           float64  `json:"total_cost"`
-	AverageLatencyMS    *float64 `json:"average_latency_ms"`
-	ZeroTokenCalls      int64    `json:"zero_token_calls"`
+	TotalCalls            int64    `json:"total_calls"`
+	SuccessCalls          int64    `json:"success_calls"`
+	FailureCalls          int64    `json:"failure_calls"`
+	SuccessRate           float64  `json:"success_rate"`
+	InputTokens           int64    `json:"input_tokens"`
+	OutputTokens          int64    `json:"output_tokens"`
+	CachedTokens          int64    `json:"cached_tokens"`
+	CacheReadTokens       int64    `json:"cache_read_tokens"`
+	CacheCreationTokens   int64    `json:"cache_creation_tokens"`
+	ImageInputTokens      int64    `json:"image_input_tokens"`
+	ImageCacheReadTokens  int64    `json:"image_cache_read_tokens"`
+	ImageOutputTokens     int64    `json:"image_output_tokens"`
+	CacheCreation1hTokens int64    `json:"cache_creation_1h_tokens"`
+	ReasoningTokens       int64    `json:"reasoning_tokens"`
+	TotalTokens           int64    `json:"total_tokens"`
+	TotalCost             float64  `json:"total_cost"`
+	CostComplete          bool     `json:"cost_complete"`
+	IncompleteCostCalls   int64    `json:"incomplete_cost_calls"`
+	AverageLatencyMS      *float64 `json:"average_latency_ms"`
+	ZeroTokenCalls        int64    `json:"zero_token_calls"`
 }
 
 type RollingSummary struct {
@@ -78,11 +84,12 @@ type RollingSummary struct {
 }
 
 type TopModel struct {
-	Model       string  `json:"model"`
-	Calls       int64   `json:"calls"`
-	Tokens      int64   `json:"tokens"`
-	Cost        float64 `json:"cost"`
-	SuccessRate float64 `json:"success_rate"`
+	Model        string  `json:"model"`
+	Calls        int64   `json:"calls"`
+	Tokens       int64   `json:"tokens"`
+	Cost         float64 `json:"cost"`
+	CostComplete bool    `json:"cost_complete"`
+	SuccessRate  float64 `json:"success_rate"`
 }
 
 type TrafficPoint struct {
@@ -135,12 +142,13 @@ type TokenMixSegment struct {
 }
 
 type ModelCostRank struct {
-	Model       string  `json:"model"`
-	Calls       int64   `json:"calls"`
-	Tokens      int64   `json:"tokens"`
-	Cost        float64 `json:"cost"`
-	SuccessRate float64 `json:"success_rate"`
-	CostShare   float64 `json:"cost_share"`
+	Model        string  `json:"model"`
+	Calls        int64   `json:"calls"`
+	Tokens       int64   `json:"tokens"`
+	Cost         float64 `json:"cost"`
+	CostComplete bool    `json:"cost_complete"`
+	SuccessRate  float64 `json:"success_rate"`
+	CostShare    float64 `json:"cost_share"`
 }
 
 type ChannelHealth struct {
@@ -425,21 +433,28 @@ func selectTopModelStats(stats []store.ModelStat, limit int) []store.ModelStat {
 }
 
 func buildTodaySummary(agg store.Aggregate, modelStats []store.ModelStat, prices map[string]store.ModelPrice) TodaySummary {
+	totCost, complete, incompleteCalls := totalCostWithStatus(modelStats, prices)
 	return TodaySummary{
-		TotalCalls:          agg.TotalCalls,
-		SuccessCalls:        agg.SuccessCalls,
-		FailureCalls:        agg.FailureCalls,
-		SuccessRate:         rate(agg.SuccessCalls, agg.TotalCalls),
-		InputTokens:         agg.InputTokens,
-		OutputTokens:        agg.OutputTokens,
-		CachedTokens:        agg.CachedTokens,
-		CacheReadTokens:     agg.CacheReadTokens,
-		CacheCreationTokens: agg.CacheCreationTokens,
-		ReasoningTokens:     agg.ReasoningTokens,
-		TotalTokens:         agg.TotalTokens,
-		TotalCost:           totalCost(modelStats, prices),
-		AverageLatencyMS:    nullableFloat(agg.AvgLatencyMS.Valid, agg.AvgLatencyMS.Float64),
-		ZeroTokenCalls:      agg.ZeroTokenCalls,
+		TotalCalls:            agg.TotalCalls,
+		SuccessCalls:          agg.SuccessCalls,
+		FailureCalls:          agg.FailureCalls,
+		SuccessRate:           rate(agg.SuccessCalls, agg.TotalCalls),
+		InputTokens:           agg.InputTokens,
+		OutputTokens:          agg.OutputTokens,
+		CachedTokens:          agg.CachedTokens,
+		CacheReadTokens:       agg.CacheReadTokens,
+		CacheCreationTokens:   agg.CacheCreationTokens,
+		ImageInputTokens:      agg.ImageInputTokens,
+		ImageCacheReadTokens:  agg.ImageCacheReadTokens,
+		ImageOutputTokens:     agg.ImageOutputTokens,
+		CacheCreation1hTokens: agg.CacheCreation1hTokens,
+		ReasoningTokens:       agg.ReasoningTokens,
+		TotalTokens:           agg.TotalTokens,
+		TotalCost:             totCost,
+		CostComplete:          complete,
+		IncompleteCostCalls:   incompleteCalls,
+		AverageLatencyMS:      nullableFloat(agg.AvgLatencyMS.Valid, agg.AvgLatencyMS.Float64),
+		ZeroTokenCalls:        agg.ZeroTokenCalls,
 	}
 }
 
@@ -457,11 +472,12 @@ func buildTopModels(stats []store.ModelStat, prices map[string]store.ModelPrice)
 	result := make([]TopModel, 0, len(aggregated))
 	for _, stat := range aggregated {
 		result = append(result, TopModel{
-			Model:       stat.Model,
-			Calls:       stat.Calls,
-			Tokens:      stat.TotalTokens,
-			Cost:        stat.Cost,
-			SuccessRate: rate(stat.SuccessCalls, stat.Calls),
+			Model:        stat.Model,
+			Calls:        stat.Calls,
+			Tokens:       stat.TotalTokens,
+			Cost:         stat.Cost,
+			CostComplete: stat.CostComplete,
+			SuccessRate:  rate(stat.SuccessCalls, stat.Calls),
 		})
 	}
 	return result
@@ -626,11 +642,12 @@ func buildModelCostRank(stats []store.ModelStat, prices map[string]store.ModelPr
 			maxCost = stat.Cost
 		}
 		rows = append(rows, ModelCostRank{
-			Model:       stat.Model,
-			Calls:       stat.Calls,
-			Tokens:      stat.TotalTokens,
-			Cost:        stat.Cost,
-			SuccessRate: rate(stat.SuccessCalls, stat.Calls),
+			Model:        stat.Model,
+			Calls:        stat.Calls,
+			Tokens:       stat.TotalTokens,
+			Cost:         stat.Cost,
+			CostComplete: stat.CostComplete,
+			SuccessRate:  rate(stat.SuccessCalls, stat.Calls),
 		})
 	}
 	for index := range rows {
@@ -785,11 +802,23 @@ func buildRecentFailures(failures []store.RecentFailure) []RecentFailure {
 	return result
 }
 
-func totalCost(stats []store.ModelStat, prices map[string]store.ModelPrice) float64 {
+func totalCostWithStatus(stats []store.ModelStat, prices map[string]store.ModelPrice) (float64, bool, int64) {
 	total := 0.0
+	complete := true
+	var incompleteCalls int64
 	for _, stat := range stats {
-		total += costForStat(stat, prices)
+		res := costResultForStat(stat, prices)
+		total += res.Cost
+		if !res.Complete {
+			complete = false
+			incompleteCalls += stat.Calls
+		}
 	}
+	return total, complete, incompleteCalls
+}
+
+func totalCost(stats []store.ModelStat, prices map[string]store.ModelPrice) float64 {
+	total, _, _ := totalCostWithStatus(stats, prices)
 	return total
 }
 
@@ -799,6 +828,7 @@ type aggregatedModelStat struct {
 	SuccessCalls int64
 	TotalTokens  int64
 	Cost         float64
+	CostComplete bool
 }
 
 func aggregateModelStats(stats []store.ModelStat, prices map[string]store.ModelPrice) []aggregatedModelStat {
@@ -814,7 +844,11 @@ func aggregateModelStats(stats []store.ModelStat, prices map[string]store.ModelP
 		entry.Calls += stat.Calls
 		entry.SuccessCalls += stat.SuccessCalls
 		entry.TotalTokens += stat.TotalTokens
-		entry.Cost += costForStat(stat, prices)
+		res := costResultForStat(stat, prices)
+		entry.Cost += res.Cost
+		if !res.Complete {
+			entry.CostComplete = false
+		}
 	}
 	result := make([]aggregatedModelStat, 0, len(order))
 	for _, model := range order {
@@ -826,8 +860,8 @@ func aggregateModelStats(stats []store.ModelStat, prices map[string]store.ModelP
 	return result
 }
 
-func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float64 {
-	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
+func costResultForStat(stat store.ModelStat, prices map[string]store.ModelPrice) pricing.CostResult {
+	return pricing.CalculateCostForModelCandidates([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		PricingModel:            stat.PricingModel,
 		ContextThresholdTokens:  stat.ContextThresholdTokens,
 		InputTokens:             stat.InputTokens,
@@ -840,7 +874,17 @@ func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
+}
+
+func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float64 {
+	return costResultForStat(stat, prices).Cost
 }
 
 func costForChannelStat(stat store.ChannelModelStat, prices map[string]store.ModelPrice) float64 {
@@ -857,6 +901,12 @@ func costForChannelStat(stat store.ChannelModelStat, prices map[string]store.Mod
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
 }
 

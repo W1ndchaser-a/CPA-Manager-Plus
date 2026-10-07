@@ -546,7 +546,6 @@ func TestModelPriceUpsertSyncedManualPriceAndNewModelRejectedWithRawDeletion(t *
 	}
 }
 
-
 func TestModelPriceStructureChangeAllowedAfterRawDeletionWithRetainedProjection(t *testing.T) {
 	ctx := context.Background()
 	db, repo := openTestDB(t)
@@ -602,7 +601,6 @@ func TestModelPriceUpsertSyncedStructureChangeAllowedAfterRawDeletionWithRetaine
 		t.Fatalf("expected model-b to be persisted")
 	}
 }
-
 
 func TestModelPriceStructureChangePreservesRetainedVerifierSystemError(t *testing.T) {
 	ctx := context.Background()
@@ -727,5 +725,105 @@ func TestReplaceAllRejectsPeakWindowsWithoutPeakTier(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected rejection")
+	}
+}
+
+func TestMultimodalAndServiceTierContextTiersPersistAndRoundTrip(t *testing.T) {
+	_, repo := openTestDB(t)
+	ctx := context.Background()
+
+	price := model.ModelPrice{
+		Prompt: 2, Completion: 10, Cache: 0.1, CacheRead: 0.1, CacheCreation: 2.5,
+		ImagePrompt: 8, ImageCompletion: 30, ImageCacheRead: 2, CacheCreation1h: 8,
+		PromptConfigured: true, CompletionConfigured: true, CacheReadConfigured: true, CacheCreationConfigured: true,
+		ImagePromptConfigured: true, ImageCompletionConfigured: true, ImageCacheReadConfigured: true, CacheCreation1hConfigured: true,
+		ContextTiers: []model.ModelPriceContextTier{
+			{
+				ThresholdTokens: 272000,
+				Prompt:          4, Completion: 15, CacheRead: 0.2, CacheCreation: 5,
+				PromptConfigured: true, CompletionConfigured: true, CacheReadConfigured: true, CacheCreationConfigured: true,
+			},
+		},
+		ServiceTiers: []model.ModelPriceServiceTier{
+			{
+				Mode: "fast", ServiceTier: "priority",
+				Prompt: 4, Completion: 20, CacheRead: 0.2, CacheCreation: 5,
+				PromptConfigured: true, CompletionConfigured: true, CacheReadConfigured: true, CacheCreationConfigured: true,
+				ContextTiers: []model.ModelPriceContextTier{
+					{
+						ThresholdTokens: 272000,
+						Prompt:          8, Completion: 30, CacheRead: 0.4, CacheCreation: 10,
+						PromptConfigured: true, CompletionConfigured: true, CacheReadConfigured: true, CacheCreationConfigured: true,
+					},
+				},
+			},
+		},
+	}
+
+	if err := repo.ReplaceAll(ctx, map[string]model.ModelPrice{"gpt-6.1-sol": price}); err != nil {
+		t.Fatalf("ReplaceAll: %v", err)
+	}
+
+	loaded, err := repo.LoadAll(ctx)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+
+	got := loaded["gpt-6.1-sol"]
+	if got.ImagePrompt != 8 || !got.ImagePromptConfigured || got.CacheCreation1h != 8 || !got.CacheCreation1hConfigured {
+		t.Fatalf("multimodal fields mismatch: %+v", got)
+	}
+	if len(got.ServiceTiers) != 1 || len(got.ServiceTiers[0].ContextTiers) != 1 {
+		t.Fatalf("service tiers or service context tiers mismatch: %+v", got.ServiceTiers)
+	}
+	stContext := got.ServiceTiers[0].ContextTiers[0]
+	if stContext.ThresholdTokens != 272000 || stContext.Prompt != 8 || stContext.Completion != 30 {
+		t.Fatalf("service tier context tier values mismatch: %+v", stContext)
+	}
+}
+
+func TestUpsertSyncedPreservesMultimodalAndServiceTierContextTiers(t *testing.T) {
+	_, repo := openTestDB(t)
+	ctx := context.Background()
+
+	price := model.ModelPrice{
+		Prompt: 2, Completion: 10,
+		PromptConfigured: true, CompletionConfigured: true,
+		ImagePrompt: 8, ImagePromptConfigured: true,
+		Source: "manual",
+		ContextTiers: []model.ModelPriceContextTier{
+			{ThresholdTokens: 272000, Prompt: 4, PromptConfigured: true},
+		},
+		ServiceTiers: []model.ModelPriceServiceTier{
+			{
+				Mode: "fast", ServiceTier: "priority", Prompt: 4, PromptConfigured: true,
+				ContextTiers: []model.ModelPriceContextTier{
+					{ThresholdTokens: 272000, Prompt: 8, PromptConfigured: true},
+				},
+			},
+		},
+	}
+
+	if err := repo.ReplaceAll(ctx, map[string]model.ModelPrice{"gpt-6.1-sol": price}); err != nil {
+		t.Fatalf("ReplaceAll: %v", err)
+	}
+
+	result, err := repo.UpsertSynced(ctx, map[string]model.ModelPrice{
+		"gpt-6.1-sol": {Prompt: 99, Source: "litellm", PromptConfigured: true},
+	})
+	if err != nil {
+		t.Fatalf("UpsertSynced: %v", err)
+	}
+	if len(result.Preserved) != 1 || result.Preserved[0] != "gpt-6.1-sol" {
+		t.Fatalf("expected manual gpt-6.1-sol to be preserved, got result: %+v", result)
+	}
+
+	loaded, err := repo.LoadAll(ctx)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	got := loaded["gpt-6.1-sol"]
+	if got.Prompt != 2 || got.ImagePrompt != 8 || len(got.ServiceTiers[0].ContextTiers) != 1 {
+		t.Fatalf("expected manual price to remain intact: %+v", got)
 	}
 }

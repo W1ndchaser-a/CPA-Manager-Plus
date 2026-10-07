@@ -630,10 +630,20 @@ export const buildPrimarySummaryCards = ({
   {
     label: shortLabel(t, 'monitoring.estimated_cost_short', 'monitoring.estimated_cost'),
     fullLabel: t('monitoring.estimated_cost'),
-    value: hasPrices ? formatUsd(summary.totalCost) : '--',
+    value: hasPrices
+      ? `${summary.costComplete === false || (summary.incompleteCostCalls ?? 0) > 0 ? '~' : ''}${formatUsd(summary.totalCost)}`
+      : '--',
     valueTitle: hasPrices ? formatUsd(summary.totalCost) : undefined,
-    meta: hasPrices ? t('monitoring.estimated_cost_hint') : t('monitoring.estimated_cost_missing'),
-    tone: hasPrices ? undefined : 'warn',
+    meta: !hasPrices
+      ? t('monitoring.estimated_cost_missing')
+      : summary.costComplete === false || (summary.incompleteCostCalls ?? 0) > 0
+        ? t('monitoring.estimated_cost_incomplete', '估算 (部分细分缺失)')
+        : t('monitoring.estimated_cost_hint'),
+    tone: hasPrices
+      ? summary.costComplete === false || (summary.incompleteCostCalls ?? 0) > 0
+        ? 'warn'
+        : undefined
+      : 'warn',
     icon: 'cost',
     accent: 'amber',
   },
@@ -1305,9 +1315,7 @@ const buildDevinAccountQuotaWindows = (
       Number.isFinite(window.resetAtMs) &&
       window.resetAtMs > 0;
     const resetLabel =
-      hasReset && window.resetAtMs !== null
-        ? formatQuotaResetTime(window.resetAtMs)
-        : '-';
+      hasReset && window.resetAtMs !== null ? formatQuotaResetTime(window.resetAtMs) : '-';
     const label = window.id === 'daily' ? t('devin_quota.daily') : t('devin_quota.weekly');
 
     return {
@@ -1457,11 +1465,7 @@ export const buildAccountQuotaEntryFromProviderState = (
       }
       return applyProviderQuotaStateMetadata(
         {
-          ...buildBaseAccountQuotaEntry(
-            { ...target, planType },
-            t,
-            metaLabels
-          ),
+          ...buildBaseAccountQuotaEntry({ ...target, planType }, t, metaLabels),
           planType,
           windows: buildClaudeAccountQuotaWindows(quota.windows, t),
         },
@@ -1514,11 +1518,7 @@ export const buildAccountQuotaEntryFromProviderState = (
       }
       return applyProviderQuotaStateMetadata(
         {
-          ...buildBaseAccountQuotaEntry(
-            { ...target, planType },
-            t,
-            metaLabels
-          ),
+          ...buildBaseAccountQuotaEntry({ ...target, planType }, t, metaLabels),
           planType,
           windows: buildDevinAccountQuotaWindows(quota.windows, t),
         },

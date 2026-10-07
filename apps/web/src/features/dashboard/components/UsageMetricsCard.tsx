@@ -50,7 +50,15 @@ interface MetricCardProps {
 type MetricStyle = CSSProperties & Record<'--accent-color', string>;
 type RankStyle = CSSProperties & Record<'--share', number>;
 
-function MetricCard({ label, value, subValue, icon, color, loading, extraAction }: MetricCardProps) {
+function MetricCard({
+  label,
+  value,
+  subValue,
+  icon,
+  color,
+  loading,
+  extraAction,
+}: MetricCardProps) {
   return (
     <div className={styles.metricCard} style={{ '--accent-color': color } as MetricStyle}>
       <div className={styles.metricHeader}>
@@ -64,7 +72,13 @@ function MetricCard({ label, value, subValue, icon, color, loading, extraAction 
       </div>
       <div className={styles.metricBgChart}>
         <svg viewBox="0 0 100 30" preserveAspectRatio="none">
-          <path d="M0,25 Q15,5 30,20 T60,10 T100,25" fill="none" stroke={color} strokeWidth="2" opacity="0.2" />
+          <path
+            d="M0,25 Q15,5 30,20 T60,10 T100,25"
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+            opacity="0.2"
+          />
         </svg>
       </div>
     </div>
@@ -122,9 +136,11 @@ export function UsageMetricsCard({
     },
     {
       label: t('dashboard.today_cost'),
-      value: today ? formatUsd(today.total_cost) : loadingText,
+      value: today
+        ? `${today.cost_complete === false || (today.incomplete_cost_calls && today.incomplete_cost_calls > 0) ? '~' : ''}${formatUsd(today.total_cost)}`
+        : loadingText,
       subValue: today
-        ? t('dashboard.metric_total_tokens', { value: formatCompactNumber(today.total_tokens) })
+        ? `${t('dashboard.metric_total_tokens', { value: formatCompactNumber(today.total_tokens) })}${today.cost_complete === false || (today.incomplete_cost_calls && today.incomplete_cost_calls > 0) ? ` (${t('dashboard.estimated_cost_note', '估算/细分缺失')})` : ''}`
         : undefined,
       icon: <IconDollarSign size={20} />,
       color: dataPalette.amber,
@@ -174,34 +190,37 @@ export function UsageMetricsCard({
         <div className={styles.rankList}>
           {(modelCostRank?.length ? modelCostRank : topModels)?.slice(0, 5).map((model, index) => {
             const hasCostShare = 'cost_share' in model && typeof model.cost_share === 'number';
-            const share =
-              hasCostShare
-                ? (model as { cost_share: number }).cost_share
-                : topModels.length
-                  ? model.tokens / Math.max(...topModels.map((item) => item.tokens), 1)
-                  : 0;
+            const share = hasCostShare
+              ? (model as { cost_share: number }).cost_share
+              : topModels.length
+                ? model.tokens / Math.max(...topModels.map((item) => item.tokens), 1)
+                : 0;
             return (
-            <div key={model.model} className={styles.rankItem}>
-              <div className={styles.rankIndex} data-rank={index + 1}>{index + 1}</div>
-              <div className={styles.rankInfo}>
-                <div className={styles.modelName}>{model.model}</div>
-                <div className={styles.rankTrack}>
-                  <div className={styles.rankBar} style={{ '--share': share } as RankStyle} />
+              <div key={model.model} className={styles.rankItem}>
+                <div className={styles.rankIndex} data-rank={index + 1}>
+                  {index + 1}
+                </div>
+                <div className={styles.rankInfo}>
+                  <div className={styles.modelName}>{model.model}</div>
+                  <div className={styles.rankTrack}>
+                    <div className={styles.rankBar} style={{ '--share': share } as RankStyle} />
+                  </div>
+                </div>
+                <div className={styles.rankValue}>
+                  <div className={styles.cost}>{formatUsd(model.cost)}</div>
+                  <div className={styles.share}>
+                    {hasCostShare
+                      ? `${(share * 100).toFixed(1)}%`
+                      : formatCompactNumber(model.tokens)}
+                  </div>
                 </div>
               </div>
-              <div className={styles.rankValue}>
-                <div className={styles.cost}>{formatUsd(model.cost)}</div>
-                <div className={styles.share}>
-                  {hasCostShare
-                    ? `${(share * 100).toFixed(1)}%`
-                    : formatCompactNumber(model.tokens)}
-                </div>
-              </div>
-            </div>
             );
           })}
           {!modelCostRank?.length && topModels.length === 0 ? (
-            <div className={styles.empty}>{loading ? '...' : t('dashboard.no_usage_rank_data')}</div>
+            <div className={styles.empty}>
+              {loading ? '...' : t('dashboard.no_usage_rank_data')}
+            </div>
           ) : null}
         </div>
       </section>
