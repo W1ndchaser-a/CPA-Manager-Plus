@@ -1302,7 +1302,14 @@ export function calculateCostWithStatus(
   }
 
   const inputTokens = Math.max(toFiniteNumber(detail.tokens?.input_tokens), 0);
-  const completionTokens = Math.max(toFiniteNumber(detail.tokens?.output_tokens), 0);
+  const rawCompletionTokens = Math.max(toFiniteNumber(detail.tokens?.output_tokens), 0);
+  const reasoningTokens = Math.max(toFiniteNumber(detail.tokens?.reasoning_tokens), 0);
+  const totalTokens = Math.max(toFiniteNumber(detail.tokens?.total_tokens), 0);
+  const missingReasoningTokens = Math.min(
+    reasoningTokens,
+    Math.max(totalTokens - inputTokens - rawCompletionTokens, 0)
+  );
+  const completionTokens = rawCompletionTokens + missingReasoningTokens;
   const cachedTokens = Math.max(
     Math.max(toFiniteNumber(detail.tokens?.cached_tokens), 0),
     Math.max(toFiniteNumber(detail.tokens?.cache_tokens), 0)
@@ -1499,7 +1506,7 @@ export function calculateCostWithStatus(
       (imageOutputTokens / TOKENS_PER_PRICE_UNIT) * imageCompletionPrice) *
       outputMultiplier;
 
-  let complete = tierComplete;
+  let complete = tierComplete && (reasoningTokens === 0 || totalTokens > 0);
   const hasDistinctImage =
     (Boolean(effectivePrice.imagePromptConfigured) && imagePromptPrice !== promptPrice) ||
     (Boolean(effectivePrice.imageCompletionConfigured) &&
