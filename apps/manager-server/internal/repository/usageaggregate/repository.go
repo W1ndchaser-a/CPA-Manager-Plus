@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	sqliteutil "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/sqliteutil"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usageprojection"
+	sqliteutil "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/sqliteutil"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usage"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usageidentity"
 )
@@ -91,6 +91,7 @@ type Filter struct {
 
 type Row struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	BucketMS            int64
 	Model               string
 	BillingModel        string
@@ -501,6 +502,12 @@ func upsertAggregateBatch(ctx context.Context, tx *sql.Tx, structureRevision str
 		long_cached_tokens,
 		long_cache_read_tokens,
 		long_cache_creation_tokens,
+		image_input_tokens,
+		image_cache_read_tokens,
+		image_output_tokens,
+		cache_creation_1h_tokens,
+		image_tokens_known,
+		cache_creation_ttl_known,
 		total_tokens,
 		latency_sum_ms,
 		latency_samples,
@@ -525,6 +532,12 @@ func upsertAggregateBatch(ctx context.Context, tx *sql.Tx, structureRevision str
 		coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens, 0) > %d then max(max(cached_tokens, cache_tokens) - max(cache_read_tokens, 0) - max(cache_creation_tokens, 0), 0) else 0 end), 0),
 		coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens, 0) > %d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens, 0) > %d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		coalesce(sum(total_tokens), 0),
 		coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
 		count(nullif(latency_ms, 0)),
@@ -551,6 +564,12 @@ func upsertAggregateBatch(ctx context.Context, tx *sql.Tx, structureRevision str
 		long_cached_tokens = usage_hourly_aggregate_v1.long_cached_tokens + excluded.long_cached_tokens,
 		long_cache_read_tokens = usage_hourly_aggregate_v1.long_cache_read_tokens + excluded.long_cache_read_tokens,
 		long_cache_creation_tokens = usage_hourly_aggregate_v1.long_cache_creation_tokens + excluded.long_cache_creation_tokens,
+		image_input_tokens = usage_hourly_aggregate_v1.image_input_tokens + excluded.image_input_tokens,
+		image_cache_read_tokens = usage_hourly_aggregate_v1.image_cache_read_tokens + excluded.image_cache_read_tokens,
+		image_output_tokens = usage_hourly_aggregate_v1.image_output_tokens + excluded.image_output_tokens,
+		cache_creation_1h_tokens = usage_hourly_aggregate_v1.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
+		image_tokens_known = min(usage_hourly_aggregate_v1.image_tokens_known, excluded.image_tokens_known),
+		cache_creation_ttl_known = min(usage_hourly_aggregate_v1.cache_creation_ttl_known, excluded.cache_creation_ttl_known),
 		total_tokens = usage_hourly_aggregate_v1.total_tokens + excluded.total_tokens,
 		latency_sum_ms = usage_hourly_aggregate_v1.latency_sum_ms + excluded.latency_sum_ms,
 		latency_samples = usage_hourly_aggregate_v1.latency_samples + excluded.latency_samples,
@@ -654,6 +673,12 @@ func mergeStoredRows(ctx context.Context, tx *sql.Tx, filter Filter, fromMS, toM
 		sum(long_cached_tokens),
 		sum(long_cache_read_tokens),
 		sum(long_cache_creation_tokens),
+		sum(image_input_tokens),
+		sum(image_cache_read_tokens),
+		sum(image_output_tokens),
+		sum(cache_creation_1h_tokens),
+		min(image_tokens_known),
+		min(cache_creation_ttl_known),
 		sum(total_tokens),
 		sum(latency_sum_ms),
 		sum(latency_samples),
@@ -720,6 +745,12 @@ func rawRowsStatementFromSource(filter Filter, fromMS, toMS, afterID int64, stru
 		coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens, 0) > %d then max(max(cached_tokens, cache_tokens) - max(cache_read_tokens, 0) - max(cache_creation_tokens, 0), 0) else 0 end), 0),
 		coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens, 0) > %d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens, 0) > %d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(coalesce(image_input_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_cache_read_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_output_tokens, 0)), 0),
+		coalesce(sum(coalesce(cache_creation_1h_tokens, 0)), 0),
+		coalesce(min(coalesce(image_tokens_known, 0)), 0),
+		coalesce(min(coalesce(cache_creation_ttl_known, 0)), 0),
 		coalesce(sum(total_tokens), 0),
 		coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
 		count(nullif(latency_ms, 0)),
@@ -745,6 +776,7 @@ func scanAndMergeRows(rows *sql.Rows, grouped map[rowKey]*Row) error {
 	for rows.Next() {
 		var row Row
 		var failed int
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.BucketMS,
 			&row.Model,
@@ -763,6 +795,12 @@ func scanAndMergeRows(rows *sql.Rows, grouped map[rowKey]*Row) error {
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.LatencySumMS,
 			&row.LatencySamples,
@@ -771,6 +809,8 @@ func scanAndMergeRows(rows *sql.Rows, grouped map[rowKey]*Row) error {
 			return err
 		}
 		row.Failed = failed != 0
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		mergeRow(grouped, row)
 	}
 	return rows.Err()
@@ -874,6 +914,12 @@ func mergeRow(grouped map[rowKey]*Row, row Row) {
 	entry.LongCachedTokens += row.LongCachedTokens
 	entry.LongCacheReadTokens += row.LongCacheReadTokens
 	entry.LongCacheCreationTokens += row.LongCacheCreationTokens
+	entry.ImageInputTokens += row.ImageInputTokens
+	entry.ImageCacheReadTokens += row.ImageCacheReadTokens
+	entry.ImageOutputTokens += row.ImageOutputTokens
+	entry.CacheCreation1hTokens += row.CacheCreation1hTokens
+	entry.ImageTokensKnown = entry.ImageTokensKnown && row.ImageTokensKnown
+	entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	entry.TotalTokens += row.TotalTokens
 	entry.LatencySumMS += row.LatencySumMS
 	entry.LatencySamples += row.LatencySamples

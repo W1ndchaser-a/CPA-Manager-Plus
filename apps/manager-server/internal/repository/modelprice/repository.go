@@ -3,10 +3,12 @@ package modelprice
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/model"
@@ -67,13 +69,14 @@ func (r *repository) LoadAll(ctx context.Context) (map[string]model.ModelPrice, 
 func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]model.ModelPrice, error) {
 	rows, err := tx.QueryContext(ctx, `select
 		model, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_read_configured, cache_creation_configured, source, source_model_id, raw_json,
-		updated_at_ms, synced_at_ms
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured,
+		source, source_model_id, raw_json, updated_at_ms, synced_at_ms
 		from model_prices order by model`)
 	if err != nil {
 		return nil, err
 	}
-
 	prices := map[string]model.ModelPrice{}
 	for rows.Next() {
 		var modelID string
@@ -81,6 +84,7 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 		var source, sourceModelID, rawJSON sql.NullString
 		var syncedAt sql.NullInt64
 		var promptConfigured, completionConfigured, cacheReadConfigured, cacheCreationConfigured configuredFlag
+		var imagePromptConfigured, imageCompletionConfigured, imageCacheReadConfigured, cacheCreation1hConfigured configuredFlag
 		if err := rows.Scan(
 			&modelID,
 			&price.Prompt,
@@ -88,10 +92,18 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 			&price.Cache,
 			&price.CacheRead,
 			&price.CacheCreation,
+			&price.ImagePrompt,
+			&price.ImageCompletion,
+			&price.ImageCacheRead,
+			&price.CacheCreation1h,
 			&promptConfigured,
 			&completionConfigured,
 			&cacheReadConfigured,
 			&cacheCreationConfigured,
+			&imagePromptConfigured,
+			&imageCompletionConfigured,
+			&imageCacheReadConfigured,
+			&cacheCreation1hConfigured,
 			&source,
 			&sourceModelID,
 			&rawJSON,
@@ -105,6 +117,10 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 		price.CompletionConfigured = bool(completionConfigured)
 		price.CacheReadConfigured = bool(cacheReadConfigured)
 		price.CacheCreationConfigured = bool(cacheCreationConfigured)
+		price.ImagePromptConfigured = bool(imagePromptConfigured)
+		price.ImageCompletionConfigured = bool(imageCompletionConfigured)
+		price.ImageCacheReadConfigured = bool(imageCacheReadConfigured)
+		price.CacheCreation1hConfigured = bool(cacheCreation1hConfigured)
 		price.SourceModelID = sourceModelID.String
 		price.RawJSON = rawJSON.String
 		if syncedAt.Valid {
@@ -123,7 +139,9 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 
 	tierRows, err := tx.QueryContext(ctx, `select
 		model, threshold_tokens, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured
 		from model_price_context_tiers order by model, threshold_tokens`)
 	if err != nil {
 		return nil, err
@@ -132,6 +150,7 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 		var modelID string
 		var tier model.ModelPriceContextTier
 		var promptConfigured, completionConfigured, cacheConfigured, cacheReadConfigured, cacheCreationConfigured configuredFlag
+		var imagePromptConfigured, imageCompletionConfigured, imageCacheReadConfigured, cacheCreation1hConfigured configuredFlag
 		if err := tierRows.Scan(
 			&modelID,
 			&tier.ThresholdTokens,
@@ -140,11 +159,19 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 			&tier.Cache,
 			&tier.CacheRead,
 			&tier.CacheCreation,
+			&tier.ImagePrompt,
+			&tier.ImageCompletion,
+			&tier.ImageCacheRead,
+			&tier.CacheCreation1h,
 			&promptConfigured,
 			&completionConfigured,
 			&cacheConfigured,
 			&cacheReadConfigured,
 			&cacheCreationConfigured,
+			&imagePromptConfigured,
+			&imageCompletionConfigured,
+			&imageCacheReadConfigured,
+			&cacheCreation1hConfigured,
 		); err != nil {
 			return nil, err
 		}
@@ -153,6 +180,10 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 		tier.CacheConfigured = bool(cacheConfigured)
 		tier.CacheReadConfigured = bool(cacheReadConfigured)
 		tier.CacheCreationConfigured = bool(cacheCreationConfigured)
+		tier.ImagePromptConfigured = bool(imagePromptConfigured)
+		tier.ImageCompletionConfigured = bool(imageCompletionConfigured)
+		tier.ImageCacheReadConfigured = bool(imageCacheReadConfigured)
+		tier.CacheCreation1hConfigured = bool(cacheCreation1hConfigured)
 		price, ok := prices[modelID]
 		if !ok {
 			continue
@@ -170,7 +201,10 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 
 	serviceTierRows, err := tx.QueryContext(ctx, `select
 		model, mode, service_tier, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured,
+		context_tiers_json
 		from model_price_service_tiers order by model, mode, service_tier`)
 	if err != nil {
 		return nil, err
@@ -179,6 +213,8 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 		var modelID string
 		var tier model.ModelPriceServiceTier
 		var promptConfigured, completionConfigured, cacheConfigured, cacheReadConfigured, cacheCreationConfigured configuredFlag
+		var imagePromptConfigured, imageCompletionConfigured, imageCacheReadConfigured, cacheCreation1hConfigured configuredFlag
+		var contextTiersJSON sql.NullString
 		if err := serviceTierRows.Scan(
 			&modelID,
 			&tier.Mode,
@@ -188,19 +224,39 @@ func (r *repository) LoadAllTx(ctx context.Context, tx *sql.Tx) (map[string]mode
 			&tier.Cache,
 			&tier.CacheRead,
 			&tier.CacheCreation,
+			&tier.ImagePrompt,
+			&tier.ImageCompletion,
+			&tier.ImageCacheRead,
+			&tier.CacheCreation1h,
 			&promptConfigured,
 			&completionConfigured,
 			&cacheConfigured,
 			&cacheReadConfigured,
 			&cacheCreationConfigured,
+			&imagePromptConfigured,
+			&imageCompletionConfigured,
+			&imageCacheReadConfigured,
+			&cacheCreation1hConfigured,
+			&contextTiersJSON,
 		); err != nil {
 			return nil, err
+		}
+		if contextTiersJSON.Valid && strings.TrimSpace(contextTiersJSON.String) != "" {
+			var parsedTiers []model.ModelPriceContextTier
+			if err := json.Unmarshal([]byte(contextTiersJSON.String), &parsedTiers); err != nil {
+				return nil, fmt.Errorf("decode context tiers for %s/%s/%s: %w", modelID, tier.Mode, tier.ServiceTier, err)
+			}
+			tier.ContextTiers = parsedTiers
 		}
 		tier.PromptConfigured = bool(promptConfigured)
 		tier.CompletionConfigured = bool(completionConfigured)
 		tier.CacheConfigured = bool(cacheConfigured)
 		tier.CacheReadConfigured = bool(cacheReadConfigured)
 		tier.CacheCreationConfigured = bool(cacheCreationConfigured)
+		tier.ImagePromptConfigured = bool(imagePromptConfigured)
+		tier.ImageCompletionConfigured = bool(imageCompletionConfigured)
+		tier.ImageCacheReadConfigured = bool(imageCacheReadConfigured)
+		tier.CacheCreation1hConfigured = bool(cacheCreation1hConfigured)
 		price, ok := prices[modelID]
 		if !ok {
 			continue
@@ -310,9 +366,11 @@ func (r *repository) ReplaceAll(ctx context.Context, prices map[string]model.Mod
 
 	stmt, err := tx.PrepareContext(ctx, `insert into model_prices (
 		model, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_read_configured, cache_creation_configured, source, source_model_id,
-		raw_json, updated_at_ms, synced_at_ms
-	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured,
+		source, source_model_id, raw_json, updated_at_ms, synced_at_ms
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
@@ -343,10 +401,18 @@ func (r *repository) ReplaceAll(ctx context.Context, prices map[string]model.Mod
 			price.Cache,
 			price.CacheRead,
 			price.CacheCreation,
+			price.ImagePrompt,
+			price.ImageCompletion,
+			price.ImageCacheRead,
+			price.CacheCreation1h,
 			price.PromptConfigured,
 			price.CompletionConfigured,
 			price.CacheReadConfigured,
 			price.CacheCreationConfigured,
+			price.ImagePromptConfigured,
+			price.ImageCompletionConfigured,
+			price.ImageCacheReadConfigured,
+			price.CacheCreation1hConfigured,
 			nullString(price.Source),
 			nullString(price.SourceModelID),
 			nullString(price.RawJSON),
@@ -387,19 +453,29 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 
 	stmt, err := tx.PrepareContext(ctx, `insert into model_prices (
 		model, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_read_configured, cache_creation_configured, source, source_model_id,
-		raw_json, updated_at_ms, synced_at_ms
-	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured,
+		source, source_model_id, raw_json, updated_at_ms, synced_at_ms
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	on conflict(model) do update set
 		prompt_per_1m = excluded.prompt_per_1m,
 		completion_per_1m = excluded.completion_per_1m,
 		cache_per_1m = excluded.cache_per_1m,
 		cache_read_per_1m = excluded.cache_read_per_1m,
 		cache_creation_per_1m = excluded.cache_creation_per_1m,
+		image_prompt_per_1m = excluded.image_prompt_per_1m,
+		image_completion_per_1m = excluded.image_completion_per_1m,
+		image_cache_read_per_1m = excluded.image_cache_read_per_1m,
+		cache_creation_1h_per_1m = excluded.cache_creation_1h_per_1m,
 		prompt_configured = excluded.prompt_configured,
 		completion_configured = excluded.completion_configured,
 		cache_read_configured = excluded.cache_read_configured,
 		cache_creation_configured = excluded.cache_creation_configured,
+		image_prompt_configured = excluded.image_prompt_configured,
+		image_completion_configured = excluded.image_completion_configured,
+		image_cache_read_configured = excluded.image_cache_read_configured,
+		cache_creation_1h_configured = excluded.cache_creation_1h_configured,
 		source = excluded.source,
 		source_model_id = excluded.source_model_id,
 		raw_json = excluded.raw_json,
@@ -463,6 +539,18 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 			result.Skipped++
 			continue
 		}
+		if len(price.PeakWindows) == 0 {
+			if existing, ok := beforePrices[modelID]; ok && len(existing.PeakWindows) > 0 {
+				price.PeakWindows = existing.PeakWindows
+			}
+		}
+		if existing, ok := beforePrices[modelID]; ok {
+			if peakRule, ok := model.SelectModelPriceServiceTier(existing, model.ModelPriceServiceTierPeak); ok {
+				if _, hasPeak := model.SelectModelPriceServiceTier(price, model.ModelPriceServiceTierPeak); !hasPeak {
+					price.ServiceTiers = append(price.ServiceTiers, peakRule)
+				}
+			}
+		}
 		if price.Source == "" {
 			price.Source = "sync"
 		}
@@ -479,10 +567,18 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 			price.Cache,
 			price.CacheRead,
 			price.CacheCreation,
+			price.ImagePrompt,
+			price.ImageCompletion,
+			price.ImageCacheRead,
+			price.CacheCreation1h,
 			price.PromptConfigured,
 			price.CompletionConfigured,
 			price.CacheReadConfigured,
 			price.CacheCreationConfigured,
+			price.ImagePromptConfigured,
+			price.ImageCompletionConfigured,
+			price.ImageCacheReadConfigured,
+			price.CacheCreation1hConfigured,
 			nullString(price.Source),
 			nullString(price.SourceModelID),
 			nullString(price.RawJSON),
@@ -544,8 +640,10 @@ func (r *repository) UpsertSynced(ctx context.Context, prices map[string]model.M
 func prepareContextTierInsert(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.PrepareContext(ctx, `insert into model_price_context_tiers (
 		model, threshold_tokens, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured
-	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 }
 
 func insertContextTiers(ctx context.Context, stmt *sql.Stmt, modelID string, tiers []model.ModelPriceContextTier) error {
@@ -559,11 +657,19 @@ func insertContextTiers(ctx context.Context, stmt *sql.Stmt, modelID string, tie
 			tier.Cache,
 			tier.CacheRead,
 			tier.CacheCreation,
+			tier.ImagePrompt,
+			tier.ImageCompletion,
+			tier.ImageCacheRead,
+			tier.CacheCreation1h,
 			tier.PromptConfigured,
 			tier.CompletionConfigured,
 			tier.CacheConfigured,
 			tier.CacheReadConfigured,
 			tier.CacheCreationConfigured,
+			tier.ImagePromptConfigured,
+			tier.ImageCompletionConfigured,
+			tier.ImageCacheReadConfigured,
+			tier.CacheCreation1hConfigured,
 		); err != nil {
 			return err
 		}
@@ -589,12 +695,23 @@ func insertPeakWindows(ctx context.Context, stmt *sql.Stmt, modelID string, wind
 func prepareServiceTierInsert(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
 	return tx.PrepareContext(ctx, `insert into model_price_service_tiers (
 		model, mode, service_tier, prompt_per_1m, completion_per_1m, cache_per_1m, cache_read_per_1m, cache_creation_per_1m,
-		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured
-	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		image_prompt_per_1m, image_completion_per_1m, image_cache_read_per_1m, cache_creation_1h_per_1m,
+		prompt_configured, completion_configured, cache_configured, cache_read_configured, cache_creation_configured,
+		image_prompt_configured, image_completion_configured, image_cache_read_configured, cache_creation_1h_configured,
+		context_tiers_json
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 }
 
 func insertServiceTiers(ctx context.Context, stmt *sql.Stmt, modelID string, tiers []model.ModelPriceServiceTier) error {
 	for _, tier := range tiers {
+		var contextTiersJSON any = nil
+		if len(tier.ContextTiers) > 0 {
+			data, err := json.Marshal(tier.ContextTiers)
+			if err != nil {
+				return fmt.Errorf("encode context tiers for %s/%s/%s: %w", modelID, tier.Mode, tier.ServiceTier, err)
+			}
+			contextTiersJSON = string(data)
+		}
 		if _, err := stmt.ExecContext(
 			ctx,
 			modelID,
@@ -605,11 +722,20 @@ func insertServiceTiers(ctx context.Context, stmt *sql.Stmt, modelID string, tie
 			tier.Cache,
 			tier.CacheRead,
 			tier.CacheCreation,
+			tier.ImagePrompt,
+			tier.ImageCompletion,
+			tier.ImageCacheRead,
+			tier.CacheCreation1h,
 			tier.PromptConfigured,
 			tier.CompletionConfigured,
 			tier.CacheConfigured,
 			tier.CacheReadConfigured,
 			tier.CacheCreationConfigured,
+			tier.ImagePromptConfigured,
+			tier.ImageCompletionConfigured,
+			tier.ImageCacheReadConfigured,
+			tier.CacheCreation1hConfigured,
+			contextTiersJSON,
 		); err != nil {
 			return err
 		}

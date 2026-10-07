@@ -31,14 +31,7 @@ export type MonitoringAuthMeta = {
   updatedAt: string;
 };
 
-export type MonitoringTimeRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '14d'
-  | '30d'
-  | 'all'
-  | 'custom';
+export type MonitoringTimeRange = 'today' | 'yesterday' | '7d' | '14d' | '30d' | 'all' | 'custom';
 
 export type MonitoringCustomTimeRange = {
   startMs: number;
@@ -241,6 +234,12 @@ export type MonitoringSummary = {
   cacheHitRate?: number;
   totalTokens: number;
   totalCost: number;
+  costComplete?: boolean;
+  incompleteCostCalls?: number;
+  imageInputTokens?: number;
+  imageCacheReadTokens?: number;
+  imageOutputTokens?: number;
+  cacheCreation1hTokens?: number;
   averageLatencyMs: number | null;
   rpm30m: number;
   tpm30m: number;

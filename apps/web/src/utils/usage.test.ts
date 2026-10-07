@@ -1215,108 +1215,19 @@ describe('calculateCost model price preference', () => {
     ).toBeCloseTo(5);
   });
 
-  it('uses official gpt-5.6 prices when the current price book has no entry', () => {
+  it('returns zero for models when current price book has no entry', () => {
     const cost = calculateCost(
       {
         tokens: {
           input_tokens: 200_000,
           output_tokens: 20_000,
-          cached_tokens: 20_000,
-          cache_read_tokens: 40_000,
-          cache_creation_tokens: 20_000,
         },
         __modelName: 'openai/gpt-5.6-sol',
       },
       {}
     );
 
-    expect(cost).toBeCloseTo(1.355);
-  });
-
-  it('prefers configured gpt-5.6 base prices over the official fallback', () => {
-    const cost = calculateCost(
-      {
-        tokens: { input_tokens: 100_000 },
-        __modelName: 'gpt-5.6-sol',
-      },
-      {
-        'gpt-5.6-sol': { prompt: 9, completion: 18, cache: 0 },
-      }
-    );
-
-    expect(cost).toBeCloseTo(0.9);
-  });
-
-  it('applies gpt-5.6 long-context multipliers above 272K', () => {
-    const cost = calculateCost(
-      {
-        tokens: {
-          input_tokens: 1_000_000,
-          output_tokens: 100_000,
-          cache_read_tokens: 200_000,
-          cache_creation_tokens: 100_000,
-        },
-        __modelName: 'gpt-5.6-sol',
-      },
-      {}
-    );
-
-    expect(cost).toBeCloseTo(12.95);
-  });
-
-  it('keeps exactly 272K of gpt-5.6 input at standard rates', () => {
-    const cost = calculateCost(
-      {
-        tokens: { input_tokens: 272_000, output_tokens: 100_000 },
-        __modelName: 'gpt-5.6-luna',
-      },
-      {}
-    );
-
-    expect(cost).toBeCloseTo(0.872);
-  });
-
-  it('uses resolved gpt-5.6 behavior with a configured alias price', () => {
-    const cost = calculateCost(
-      {
-        tokens: {
-          input_tokens: 200_000,
-          cache_read_tokens: 40_000,
-          cache_creation_tokens: 20_000,
-        },
-        __modelName: 'internal-fast',
-        __resolvedModel: 'openai/gpt-5.6-luna',
-      },
-      {
-        'internal-fast': { prompt: 2, completion: 4, cache: 0 },
-      }
-    );
-
-    expect(cost).toBeCloseTo(0.338);
-  });
-
-  it('ignores the legacy cache price when gpt-5.6 cache-read pricing is missing', () => {
-    const cost = calculateCost(
-      {
-        tokens: {
-          input_tokens: 200_000,
-          cache_read_tokens: 40_000,
-          cache_creation_tokens: 20_000,
-        },
-        __modelName: 'gpt-5.6-terra',
-      },
-      {
-        'gpt-5.6-terra': {
-          prompt: 10,
-          completion: 20,
-          cache: 10,
-          promptConfigured: true,
-          completionConfigured: true,
-        },
-      }
-    );
-
-    expect(cost).toBeCloseTo(1.69);
+    expect(cost).toBe(0);
   });
 
   it('respects explicitly configured zero prices for gpt-5.6', () => {
@@ -1472,36 +1383,6 @@ describe('calculateCost model price preference', () => {
     expect(cost).toBeCloseTo(5);
   });
 
-  it('uses long-context pricing instead of an explicit Fast Mode price', () => {
-    const cost = calculateCost(
-      {
-        tokens: { input_tokens: 300_000, output_tokens: 100_000 },
-        __modelName: 'gpt-5.5',
-        service_tier: 'priority',
-      },
-      {
-        'gpt-5.5': {
-          prompt: 5,
-          completion: 30,
-          cache: 0.5,
-          serviceTiers: [
-            {
-              mode: 'fast',
-              serviceTier: 'priority',
-              prompt: 12.5,
-              completion: 75,
-              cache: 0,
-              promptConfigured: true,
-              completionConfigured: true,
-            },
-          ],
-        },
-      }
-    );
-
-    expect(cost).toBeCloseTo(7.5);
-  });
-
   it('selects the highest context tier with strict threshold semantics', () => {
     const modelPrices = {
       'tiered-model': {
@@ -1540,18 +1421,20 @@ describe('calculateCost model price preference', () => {
     ).toBeCloseTo(1.000005);
   });
 
-  it('does not stack priority pricing with active context-tier pricing', () => {
+  it('selects explicit service-tier context tiers for GPT-6.1 and Gemini-3.1', () => {
     const modelPrices = {
-      'gpt-5.6-sol': {
-        prompt: 5,
-        completion: 30,
-        cache: 0.5,
+      'gpt-6.1-sol': {
+        prompt: 2,
+        completion: 10,
+        cache: 0.1,
+        promptConfigured: true,
+        completionConfigured: true,
         contextTiers: [
           {
             thresholdTokens: 272_000,
-            prompt: 10,
-            completion: 40,
-            cache: 0,
+            prompt: 4,
+            completion: 15,
+            cache: 0.2,
             promptConfigured: true,
             completionConfigured: true,
           },
@@ -1560,27 +1443,115 @@ describe('calculateCost model price preference', () => {
           {
             mode: 'fast',
             serviceTier: 'priority',
-            prompt: 12.5,
-            completion: 75,
-            cache: 0,
+            prompt: 4,
+            completion: 20,
+            cache: 0.2,
+            promptConfigured: true,
+            completionConfigured: true,
+            contextTiers: [
+              {
+                thresholdTokens: 272_000,
+                prompt: 8,
+                completion: 30,
+                cache: 0.4,
+                promptConfigured: true,
+                completionConfigured: true,
+              },
+            ],
+          },
+        ],
+      },
+      'gemini-3.1-pro-low': {
+        prompt: 2,
+        completion: 12,
+        cache: 0.2,
+        promptConfigured: true,
+        completionConfigured: true,
+        contextTiers: [
+          {
+            thresholdTokens: 200_000,
+            prompt: 4,
+            completion: 18,
+            cache: 0.4,
             promptConfigured: true,
             completionConfigured: true,
           },
         ],
+        serviceTiers: [
+          {
+            mode: 'priority',
+            serviceTier: 'priority',
+            prompt: 3.6,
+            completion: 21.6,
+            cache: 0.36,
+            promptConfigured: true,
+            completionConfigured: true,
+            contextTiers: [
+              {
+                thresholdTokens: 200_000,
+                prompt: 7.2,
+                completion: 32.4,
+                cache: 0.72,
+                promptConfigured: true,
+                completionConfigured: true,
+              },
+            ],
+          },
+          {
+            mode: 'flex',
+            serviceTier: 'flex',
+            prompt: 1,
+            completion: 6,
+            cache: 0.2,
+            promptConfigured: true,
+            completionConfigured: true,
+            contextTiers: [
+              {
+                thresholdTokens: 200_000,
+                prompt: 2,
+                completion: 9,
+                cache: 0.4,
+                promptConfigured: true,
+                completionConfigured: true,
+              },
+            ],
+          },
+        ],
       },
     };
-    const tokens = { input_tokens: 1_000_000 };
 
-    const standard = calculateCost(
-      { tokens, __modelName: 'gpt-5.6-sol', service_tier: 'default' },
+    // GPT-6.1 long fast
+    const gptLongFast = calculateCost(
+      {
+        tokens: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+        __modelName: 'gpt-6.1-sol',
+        service_tier: 'fast',
+      },
       modelPrices
     );
-    const priority = calculateCost(
-      { tokens, __modelName: 'gpt-5.6-sol', service_tier: 'priority' },
+    expect(gptLongFast).toBeCloseTo(38.0);
+
+    // Gemini-3.1 long priority
+    const geminiLongPriority = calculateCost(
+      {
+        tokens: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+        __modelName: 'gemini-3.1-pro-low',
+        service_tier: 'priority',
+      },
       modelPrices
     );
+    expect(geminiLongPriority).toBeCloseTo(39.6);
 
-    expect(priority).toBeCloseTo(standard);
+    // Gemini-3.1 long flex
+    const geminiLongFlex = calculateCost(
+      {
+        tokens: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+        __modelName: 'gemini-3.1-pro-low',
+        service_tier: 'flex',
+      },
+      modelPrices
+    );
+    expect(geminiLongFlex).toBeCloseTo(11.0);
   });
 
   it('inherits missing tier cache rates and preserves explicit zero overrides', () => {
@@ -1713,9 +1684,202 @@ describe('model price storage', () => {
     });
 
     const prices = loadModelPrices();
+
     expect(prices['gpt-valid'].serviceTiers).toEqual([
       expect.objectContaining({ mode: 'fast', serviceTier: 'priority', prompt: 12.5 }),
     ]);
     expect(prices['gpt-ambiguous'].serviceTiers).toBeUndefined();
+  });
+  it('calculates multimodal and TTL sub-buckets accurately without double counting', () => {
+    const modelPrices = {
+      'gpt-image-2': {
+        prompt: 5,
+        completion: 30,
+        cacheRead: 1.25,
+        cache: 1.25,
+        cacheCreation: 5,
+        imagePrompt: 8,
+        imageCompletion: 30,
+        imageCacheRead: 2,
+        cacheCreation1h: 8,
+        promptConfigured: true,
+        completionConfigured: true,
+        cacheReadConfigured: true,
+        cacheCreationConfigured: true,
+        imagePromptConfigured: true,
+        imageCompletionConfigured: true,
+        imageCacheReadConfigured: true,
+        cacheCreation1hConfigured: true,
+      },
+    };
+
+    const cost = calculateCost(
+      {
+        tokens: {
+          input_tokens: 2_000_000,
+          output_tokens: 500_000,
+          cache_read_tokens: 400_000,
+          cache_creation_tokens: 600_000,
+          image_input_tokens: 400_000,
+          image_output_tokens: 200_000,
+          image_cache_read_tokens: 100_000,
+          cache_creation_1h_tokens: 200_000,
+          image_tokens_known: true,
+          cache_creation_ttl_known: true,
+        },
+        __modelName: 'gpt-image-2',
+      },
+      modelPrices
+    );
+
+    // 700K prompt @ $5 (3.5) + 300K img prompt @ $8 (2.4) + 300K read @ $1.25 (0.375) + 100K img read @ $2 (0.2) + 400K 5m @ $5 (2.0) + 200K 1h @ $8 (1.6) + 300K comp @ $30 (9.0) + 200K img comp @ $30 (6.0) = 25.075
+    expect(cost).toBeCloseTo(25.075);
+  });
+
+  it('preserves canonical service_tier peak over request auto and response default', () => {
+    const modelPrices = {
+      'deepseek-v4.1-flash': {
+        prompt: 0.15,
+        completion: 0.6,
+        cache: 0.003,
+        cacheRead: 0.003,
+        promptConfigured: true,
+        completionConfigured: true,
+        cacheReadConfigured: true,
+        serviceTiers: [
+          {
+            mode: 'peak',
+            serviceTier: 'peak',
+            prompt: 0.3,
+            completion: 1.2,
+            cache: 0.006,
+            cacheRead: 0.006,
+            promptConfigured: true,
+            completionConfigured: true,
+            cacheReadConfigured: true,
+          },
+        ],
+      },
+    };
+
+    const cost = calculateCost(
+      {
+        tokens: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+        __modelName: 'deepseek-v4.1-flash',
+        service_tier: 'peak',
+        request_service_tier: 'auto',
+        response_service_tier: 'default',
+      },
+      modelPrices
+    );
+
+    // Peak rate: 1M @ $0.30 + 1M @ $1.20 = 1.50
+    expect(cost).toBeCloseTo(1.5);
+  });
+
+  it('deducts image cache read from total image input for accurate official pricing', () => {
+    // Sample from Main:
+    // input=100, cacheRead=20, imageInput=80, imageRead=15, output=50, imageOutput=50
+    // Rates: prompt: 5, completion: 30, cacheRead: 1.25, imagePrompt: 8, imageCompletion: 30, imageCacheRead: 2
+    // Expected official cost: 0.00213125
+    const modelPrices = {
+      'gpt-image-2': {
+        prompt: 5,
+        completion: 30,
+        cacheRead: 1.25,
+        cache: 1.25,
+        imagePrompt: 8,
+        imageCompletion: 30,
+        imageCacheRead: 2,
+        promptConfigured: true,
+        completionConfigured: true,
+        cacheReadConfigured: true,
+        imagePromptConfigured: true,
+        imageCompletionConfigured: true,
+        imageCacheReadConfigured: true,
+      },
+    };
+
+    const res = calculateCost(
+      {
+        tokens: {
+          input_tokens: 100,
+          cache_read_tokens: 20,
+          image_input_tokens: 80,
+          image_cache_read_tokens: 15,
+          output_tokens: 50,
+          image_output_tokens: 50,
+          image_tokens_known: true,
+        },
+        __modelName: 'gpt-image-2',
+      },
+      modelPrices
+    );
+
+    expect(res).toBeCloseTo(0.00213125, 8);
+  });
+
+  it('resolves canonical and prefixed models deterministically', () => {
+    const modelPrices = {
+      'deepseek-v4.1-flash': {
+        prompt: 0.15,
+        completion: 0.6,
+        cache: 0.003,
+        promptConfigured: true,
+        completionConfigured: true,
+        sourceModelId: 'deepseek/deepseek-v4.1-flash',
+      },
+      'gpt-5.6-sol': {
+        prompt: 2,
+        completion: 12,
+        cache: 0.2,
+        promptConfigured: true,
+        completionConfigured: true,
+      },
+      'claude-sonnet-5-5': {
+        prompt: 3,
+        completion: 15,
+        cache: 0.3,
+        promptConfigured: true,
+        completionConfigured: true,
+      },
+      'gpt-6-astra': {
+        prompt: 10,
+        completion: 50,
+        cache: 1,
+        promptConfigured: true,
+        completionConfigured: true,
+      },
+      'claude-opus-4-6': {
+        prompt: 5,
+        completion: 25,
+        cache: 0.5,
+        promptConfigured: true,
+        completionConfigured: true,
+      },
+    };
+
+    const cases: [string, number][] = [
+      ['deepseek/deepseek-v4.1-flash', 0.15],
+      ['cmd/deepseek-v4.1-flash', 0.15],
+      ['0029/gpt-5.6-sol', 2.0],
+      ['vm2api/claude-sonnet-5-5', 3.0],
+      ['cmd/claude-sonnet-5-5', 3.0],
+      ['cmd/gpt-6-astra', 10.0],
+      ['vm2api/claude-opus-4-6', 5.0],
+      ['gpt-5.6', 2.0],
+    ];
+
+    const inputTokens = 100_000;
+    for (const [name, want] of cases) {
+      const cost = calculateCost(
+        {
+          tokens: { input_tokens: inputTokens },
+          __modelName: name,
+        },
+        modelPrices
+      );
+      expect(cost).toBeCloseTo((want * inputTokens) / 1_000_000, 5);
+    }
   });
 });

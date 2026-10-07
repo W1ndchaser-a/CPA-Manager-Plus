@@ -282,20 +282,26 @@ type AccountHistoryCheckpointState struct {
 }
 
 type AccountHistoryItem struct {
-	RowKey         string                 `json:"row_key"`
-	AccountKey     string                 `json:"account_key"`
-	Matched        bool                   `json:"matched"`
-	TotalRequests  int64                  `json:"total_requests"`
-	SuccessCalls   int64                  `json:"success_calls"`
-	FailureCalls   int64                  `json:"failure_calls"`
-	TotalTokens    int64                  `json:"total_tokens"`
-	TotalCost      *float64               `json:"total_cost"`
-	SuccessRate    *float64               `json:"success_rate"`
-	FirstSeenMS    *int64                 `json:"first_seen_ms"`
-	LastSeenMS     *int64                 `json:"last_seen_ms"`
-	LatestRequest  *AccountLatestRequest  `json:"latest_request,omitempty"`
-	RecentRequests []AccountLatestRequest `json:"recent_requests,omitempty"`
-	SyncStatus     string                 `json:"sync_status"`
+	RowKey                string                 `json:"row_key"`
+	AccountKey            string                 `json:"account_key"`
+	Matched               bool                   `json:"matched"`
+	TotalRequests         int64                  `json:"total_requests"`
+	SuccessCalls          int64                  `json:"success_calls"`
+	FailureCalls          int64                  `json:"failure_calls"`
+	TotalTokens           int64                  `json:"total_tokens"`
+	TotalCost             *float64               `json:"total_cost"`
+	CostComplete          bool                   `json:"cost_complete"`
+	IncompleteCostCalls   int64                  `json:"incomplete_cost_calls"`
+	ImageInputTokens      int64                  `json:"image_input_tokens"`
+	ImageCacheReadTokens  int64                  `json:"image_cache_read_tokens"`
+	ImageOutputTokens     int64                  `json:"image_output_tokens"`
+	CacheCreation1hTokens int64                  `json:"cache_creation_1h_tokens"`
+	SuccessRate           *float64               `json:"success_rate"`
+	FirstSeenMS           *int64                 `json:"first_seen_ms"`
+	LastSeenMS            *int64                 `json:"last_seen_ms"`
+	LatestRequest         *AccountLatestRequest  `json:"latest_request,omitempty"`
+	RecentRequests        []AccountLatestRequest `json:"recent_requests,omitempty"`
+	SyncStatus            string                 `json:"sync_status"`
 }
 
 // AccountLatestRequest is the most recent persisted request for an auth file.
@@ -433,6 +439,12 @@ type Summary struct {
 	ReasoningTokens       int64    `json:"reasoning_tokens"`
 	TotalTokens           int64    `json:"total_tokens"`
 	TotalCost             float64  `json:"total_cost"`
+	CostComplete          bool     `json:"cost_complete"`
+	IncompleteCostCalls   int64    `json:"incomplete_cost_calls"`
+	ImageInputTokens      int64    `json:"image_input_tokens"`
+	ImageCacheReadTokens  int64    `json:"image_cache_read_tokens"`
+	ImageOutputTokens     int64    `json:"image_output_tokens"`
+	CacheCreation1hTokens int64    `json:"cache_creation_1h_tokens"`
 	AverageCostPerCall    float64  `json:"average_cost_per_call"`
 	AverageLatencyMS      *float64 `json:"average_latency_ms"`
 	P95LatencyMS          *float64 `json:"p95_latency_ms"`
@@ -1943,20 +1955,26 @@ func (s *Service) accountHistory(ctx context.Context, req AccountHistoryRequest)
 			successRate = &value
 		}
 		items = append(items, AccountHistoryItem{
-			RowKey:         req.Accounts[index].RowKey,
-			AccountKey:     key,
-			Matched:        true,
-			TotalRequests:  total.requests,
-			SuccessCalls:   total.successCalls,
-			FailureCalls:   total.failureCalls,
-			TotalTokens:    total.totalTokens,
-			TotalCost:      accountHistoryCostPointer(total),
-			SuccessRate:    successRate,
-			FirstSeenMS:    nullableMSPointer(total.firstSeenMS),
-			LastSeenMS:     nullableMSPointer(total.lastSeenMS),
-			LatestRequest:  latestRequest,
-			RecentRequests: targetRecentRequests,
-			SyncStatus:     accountHistorySyncStatus(true, pending),
+			RowKey:                req.Accounts[index].RowKey,
+			AccountKey:            key,
+			Matched:               true,
+			TotalRequests:         total.requests,
+			SuccessCalls:          total.successCalls,
+			FailureCalls:          total.failureCalls,
+			TotalTokens:           total.totalTokens,
+			TotalCost:             accountHistoryCostPointer(total),
+			CostComplete:          total.costComplete,
+			IncompleteCostCalls:   total.incompleteCostCalls,
+			ImageInputTokens:      total.imageInputTokens,
+			ImageCacheReadTokens:  total.imageCacheReadTokens,
+			ImageOutputTokens:     total.imageOutputTokens,
+			CacheCreation1hTokens: total.cacheCreation1hTokens,
+			SuccessRate:           successRate,
+			FirstSeenMS:           nullableMSPointer(total.firstSeenMS),
+			LastSeenMS:            nullableMSPointer(total.lastSeenMS),
+			LatestRequest:         latestRequest,
+			RecentRequests:        targetRecentRequests,
+			SyncStatus:            accountHistorySyncStatus(true, pending),
 		})
 	}
 
@@ -2639,7 +2657,7 @@ func buildSummary(agg store.Aggregate, latencySummary store.LatencySummary, roll
 		}
 	}
 	approxTasks := int64(len(taskBuckets))
-	totalCost := sumCost(modelStats, prices)
+	totalCost, costComplete, incompleteCalls := sumCostWithStatus(modelStats, prices)
 	return &Summary{
 		TotalCalls:            agg.TotalCalls,
 		SuccessCalls:          agg.SuccessCalls,
@@ -2650,10 +2668,16 @@ func buildSummary(agg store.Aggregate, latencySummary store.LatencySummary, roll
 		CachedTokens:          agg.CachedTokens,
 		CacheReadTokens:       agg.CacheReadTokens,
 		CacheCreationTokens:   agg.CacheCreationTokens,
+		ImageInputTokens:      agg.ImageInputTokens,
+		ImageCacheReadTokens:  agg.ImageCacheReadTokens,
+		ImageOutputTokens:     agg.ImageOutputTokens,
+		CacheCreation1hTokens: agg.CacheCreation1hTokens,
 		CacheHitRate:          cacheHitRateForModelStats(modelStats),
 		ReasoningTokens:       agg.ReasoningTokens,
 		TotalTokens:           agg.TotalTokens,
 		TotalCost:             totalCost,
+		CostComplete:          costComplete,
+		IncompleteCostCalls:   incompleteCalls,
 		AverageCostPerCall:    ratioFloat(totalCost, agg.TotalCalls),
 		AverageLatencyMS:      nullableFloat(agg.AvgLatencyMS.Valid, agg.AvgLatencyMS.Float64),
 		P95LatencyMS:          nullableFloat(latencySummary.P95LatencyMS.Valid, latencySummary.P95LatencyMS.Float64),
@@ -4087,14 +4111,20 @@ func buildHeaderSnapshots(items []store.HeaderSnapshot) []HeaderSnapshot {
 }
 
 type accountHistoryTotal struct {
-	requests      int64
-	successCalls  int64
-	failureCalls  int64
-	totalTokens   int64
-	cost          float64
-	costAvailable bool
-	firstSeenMS   int64
-	lastSeenMS    int64
+	requests              int64
+	successCalls          int64
+	failureCalls          int64
+	totalTokens           int64
+	cost                  float64
+	costAvailable         bool
+	costComplete          bool
+	incompleteCostCalls   int64
+	imageInputTokens      int64
+	imageCacheReadTokens  int64
+	imageOutputTokens     int64
+	cacheCreation1hTokens int64
+	firstSeenMS           int64
+	lastSeenMS            int64
 }
 
 func accountHistoryTargetKey(target AccountHistoryTarget) (string, bool) {
@@ -4224,14 +4254,18 @@ func buildPricingAccountHistoryTotals(rows []store.UsagePricingAccountRow, price
 	for _, row := range rows {
 		total := totals[row.AccountKey]
 		if total == nil {
-			total = &accountHistoryTotal{costAvailable: true}
+			total = &accountHistoryTotal{costAvailable: true, costComplete: true}
 			totals[row.AccountKey] = total
 		}
 		total.requests += row.Calls
 		total.successCalls += row.SuccessCalls
 		total.failureCalls += row.FailureCalls
 		total.totalTokens += row.TotalTokens
-		total.cost += pricing.CostForModelCandidatesWithServiceTier(
+		total.imageInputTokens += row.ImageInputTokens
+		total.imageCacheReadTokens += row.ImageCacheReadTokens
+		total.imageOutputTokens += row.ImageOutputTokens
+		total.cacheCreation1hTokens += row.CacheCreation1hTokens
+		res := pricing.CalculateCostForModelCandidates(
 			[]string{row.BillingModel, row.Model},
 			row.ServiceTier,
 			pricing.ModelTokens{
@@ -4247,9 +4281,20 @@ func buildPricingAccountHistoryTotals(rows []store.UsagePricingAccountRow, price
 				LongCachedTokens:        row.LongCachedTokens,
 				LongCacheReadTokens:     row.LongCacheReadTokens,
 				LongCacheCreationTokens: row.LongCacheCreationTokens,
+				ImageInputTokens:        row.ImageInputTokens,
+				ImageCacheReadTokens:    row.ImageCacheReadTokens,
+				ImageOutputTokens:       row.ImageOutputTokens,
+				CacheCreation1hTokens:   row.CacheCreation1hTokens,
+				ImageTokensKnown:        row.ImageTokensKnown,
+				CacheCreationTTLKnown:   row.CacheCreationTTLKnown,
 			},
 			prices,
 		)
+		total.cost += res.Cost
+		if !res.Complete {
+			total.costComplete = false
+			total.incompleteCostCalls += row.Calls
+		}
 		if total.firstSeenMS == 0 || (row.FirstSeenMS > 0 && row.FirstSeenMS < total.firstSeenMS) {
 			total.firstSeenMS = row.FirstSeenMS
 		}
@@ -4582,16 +4627,28 @@ func nullableMSPointer(value int64) *int64 {
 	return &value
 }
 
-func sumCost(stats []store.ModelStat, prices map[string]store.ModelPrice) float64 {
+func sumCostWithStatus(stats []store.ModelStat, prices map[string]store.ModelPrice) (float64, bool, int64) {
 	total := 0.0
+	complete := true
+	var incompleteCalls int64
 	for _, stat := range stats {
-		total += costForStat(stat, prices)
+		res := costResultForStat(stat, prices)
+		total += res.Cost
+		if !res.Complete {
+			complete = false
+			incompleteCalls += stat.Calls
+		}
 	}
-	return total
+	return total, complete, incompleteCalls
 }
 
-func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float64 {
-	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
+func sumCost(stats []store.ModelStat, prices map[string]store.ModelPrice) float64 {
+	tot, _, _ := sumCostWithStatus(stats, prices)
+	return tot
+}
+
+func costResultForStat(stat store.ModelStat, prices map[string]store.ModelPrice) pricing.CostResult {
+	return pricing.CalculateCostForModelCandidates([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		PricingModel:            stat.PricingModel,
 		ContextThresholdTokens:  stat.ContextThresholdTokens,
 		InputTokens:             stat.InputTokens,
@@ -4604,7 +4661,17 @@ func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
+}
+
+func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float64 {
+	return costResultForStat(stat, prices).Cost
 }
 
 func costForTimelinePoint(point store.TimelinePoint, prices map[string]store.ModelPrice) float64 {
@@ -4621,6 +4688,12 @@ func costForTimelinePoint(point store.TimelinePoint, prices map[string]store.Mod
 		LongCachedTokens:        point.LongCachedTokens,
 		LongCacheReadTokens:     point.LongCacheReadTokens,
 		LongCacheCreationTokens: point.LongCacheCreationTokens,
+		ImageInputTokens:        point.ImageInputTokens,
+		ImageCacheReadTokens:    point.ImageCacheReadTokens,
+		ImageOutputTokens:       point.ImageOutputTokens,
+		CacheCreation1hTokens:   point.CacheCreation1hTokens,
+		ImageTokensKnown:        point.ImageTokensKnown,
+		CacheCreationTTLKnown:   point.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4638,6 +4711,12 @@ func costForHeatmapPoint(point store.HeatmapPoint, prices map[string]store.Model
 		LongCachedTokens:        point.LongCachedTokens,
 		LongCacheReadTokens:     point.LongCacheReadTokens,
 		LongCacheCreationTokens: point.LongCacheCreationTokens,
+		ImageInputTokens:        point.ImageInputTokens,
+		ImageCacheReadTokens:    point.ImageCacheReadTokens,
+		ImageOutputTokens:       point.ImageOutputTokens,
+		CacheCreation1hTokens:   point.CacheCreation1hTokens,
+		ImageTokensKnown:        point.ImageTokensKnown,
+		CacheCreationTTLKnown:   point.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4655,6 +4734,12 @@ func costForChannelStat(stat store.ChannelModelStat, prices map[string]store.Mod
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4672,6 +4757,12 @@ func costForAccountModelStat(stat store.AccountModelStat, prices map[string]stor
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4689,6 +4780,12 @@ func costForAPIKeyModelStat(stat store.APIKeyModelStat, prices map[string]store.
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4706,6 +4803,12 @@ func costForCredentialModelStat(stat store.CredentialModelStat, prices map[strin
 		LongCachedTokens:        stat.LongCachedTokens,
 		LongCacheReadTokens:     stat.LongCacheReadTokens,
 		LongCacheCreationTokens: stat.LongCacheCreationTokens,
+		ImageInputTokens:        stat.ImageInputTokens,
+		ImageCacheReadTokens:    stat.ImageCacheReadTokens,
+		ImageOutputTokens:       stat.ImageOutputTokens,
+		CacheCreation1hTokens:   stat.CacheCreation1hTokens,
+		ImageTokensKnown:        stat.ImageTokensKnown,
+		CacheCreationTTLKnown:   stat.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4723,6 +4826,12 @@ func costForCredentialTimelinePoint(point store.CredentialTimelinePoint, prices 
 		LongCachedTokens:        point.LongCachedTokens,
 		LongCacheReadTokens:     point.LongCacheReadTokens,
 		LongCacheCreationTokens: point.LongCacheCreationTokens,
+		ImageInputTokens:        point.ImageInputTokens,
+		ImageCacheReadTokens:    point.ImageCacheReadTokens,
+		ImageOutputTokens:       point.ImageOutputTokens,
+		CacheCreation1hTokens:   point.CacheCreation1hTokens,
+		ImageTokensKnown:        point.ImageTokensKnown,
+		CacheCreationTTLKnown:   point.CacheCreationTTLKnown,
 	}, prices)
 }
 
@@ -4740,6 +4849,12 @@ func costForAPIKeyTimelinePoint(point store.APIKeyTimelinePoint, prices map[stri
 		LongCachedTokens:        point.LongCachedTokens,
 		LongCacheReadTokens:     point.LongCacheReadTokens,
 		LongCacheCreationTokens: point.LongCacheCreationTokens,
+		ImageInputTokens:        point.ImageInputTokens,
+		ImageCacheReadTokens:    point.ImageCacheReadTokens,
+		ImageOutputTokens:       point.ImageOutputTokens,
+		CacheCreation1hTokens:   point.CacheCreation1hTokens,
+		ImageTokensKnown:        point.ImageTokensKnown,
+		CacheCreationTTLKnown:   point.CacheCreationTTLKnown,
 	}, prices)
 }
 

@@ -59,6 +59,7 @@ var pricingBandedUsageEventsCTE = pricingBandedUsageEventsCTEWithBaseFilter("")
 // Aggregate captures roll-up metrics for a usage_events window.
 type Aggregate struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	TotalCalls          int64
 	SuccessCalls        int64
 	FailureCalls        int64
@@ -78,6 +79,7 @@ type Aggregate struct {
 type ModelStat struct {
 	usage.LongContextTokens
 	usage.PricingBand
+	usage.BillingTokenDetails
 	Model               string
 	BillingModel        string
 	ServiceTier         string
@@ -133,6 +135,12 @@ var aggregateSQL = fmt.Sprintf(`select
 	coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens) > %[1]d then max(max(cached_tokens, cache_tokens) - max(cache_read_tokens, 0) - max(cache_creation_tokens, 0), 0) else 0 end), 0),
 	coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens) > %[1]d then cache_read_tokens else 0 end), 0),
 	coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens) > %[1]d then cache_creation_tokens else 0 end), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	avg(nullif(latency_ms, 0)),
 	count(nullif(latency_ms, 0)),
@@ -145,6 +153,7 @@ func (r *repository) AggregateBetween(ctx context.Context, fromMs, toMs int64) (
 	row := r.db.QueryRowContext(ctx, aggregateSQL, fromMs, toMs)
 	var agg Aggregate
 	var success, failure sql.NullInt64
+	var imageKnown, ttlKnown int
 	if err := row.Scan(
 		&agg.TotalCalls,
 		&success,
@@ -160,6 +169,12 @@ func (r *repository) AggregateBetween(ctx context.Context, fromMs, toMs int64) (
 		&agg.LongCachedTokens,
 		&agg.LongCacheReadTokens,
 		&agg.LongCacheCreationTokens,
+		&agg.ImageInputTokens,
+		&agg.ImageCacheReadTokens,
+		&agg.ImageOutputTokens,
+		&agg.CacheCreation1hTokens,
+		&imageKnown,
+		&ttlKnown,
 		&agg.TotalTokens,
 		&agg.AvgLatencyMS,
 		&agg.LatencySamples,
@@ -169,6 +184,8 @@ func (r *repository) AggregateBetween(ctx context.Context, fromMs, toMs int64) (
 	}
 	agg.SuccessCalls = success.Int64
 	agg.FailureCalls = failure.Int64
+	agg.ImageTokensKnown = imageKnown != 0
+	agg.CacheCreationTTLKnown = ttlKnown != 0
 	return agg, nil
 }
 
@@ -200,6 +217,12 @@ select
 	coalesce(sum(case when coalesce(e.normalized_total_input_tokens, e.input_tokens) > %[1]d then max(max(e.cached_tokens, e.cache_tokens) - max(e.cache_read_tokens, 0) - max(e.cache_creation_tokens, 0), 0) else 0 end), 0),
 	coalesce(sum(case when coalesce(e.normalized_total_input_tokens, e.input_tokens) > %[1]d then e.cache_read_tokens else 0 end), 0),
 	coalesce(sum(case when coalesce(e.normalized_total_input_tokens, e.input_tokens) > %[1]d then e.cache_creation_tokens else 0 end), 0),
+	coalesce(sum(e.image_input_tokens), 0),
+	coalesce(sum(e.image_cache_read_tokens), 0),
+	coalesce(sum(e.image_output_tokens), 0),
+	coalesce(sum(e.cache_creation_1h_tokens), 0),
+	coalesce(min(e.image_tokens_known), 0),
+	coalesce(min(e.cache_creation_ttl_known), 0),
 	coalesce(sum(e.total_tokens), 0)
 from banded_usage_events e
 join top_models t on t.model = e.analytics_model_value
@@ -220,6 +243,7 @@ func (r *repository) TopModelsBetween(ctx context.Context, fromMs, toMs int64, l
 	stats := make([]ModelStat, 0, limit)
 	for rows.Next() {
 		var stat ModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.Model,
 			&stat.BillingModel,
@@ -239,10 +263,18 @@ func (r *repository) TopModelsBetween(ctx context.Context, fromMs, toMs int64, l
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	return stats, rows.Err()
@@ -268,6 +300,12 @@ select
 	coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens) > %[1]d then max(max(cached_tokens, cache_tokens) - max(cache_read_tokens, 0) - max(cache_creation_tokens, 0), 0) else 0 end), 0),
 	coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens) > %[1]d then cache_read_tokens else 0 end), 0),
 	coalesce(sum(case when coalesce(normalized_total_input_tokens, input_tokens) > %[1]d then cache_creation_tokens else 0 end), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0)
 from banded_usage_events
 where timestamp_ms >= ? and timestamp_ms < ?
@@ -285,6 +323,7 @@ func (r *repository) ModelStatsBetween(ctx context.Context, fromMs, toMs int64) 
 	stats := make([]ModelStat, 0)
 	for rows.Next() {
 		var stat ModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.Model,
 			&stat.BillingModel,
@@ -304,10 +343,18 @@ func (r *repository) ModelStatsBetween(ctx context.Context, fromMs, toMs int64) 
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	return stats, rows.Err()
