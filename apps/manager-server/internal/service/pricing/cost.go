@@ -18,6 +18,8 @@ type ModelTokens struct {
 	ContextThresholdTokens  int64
 	InputTokens             int64
 	OutputTokens            int64
+	ReasoningTokens         int64
+	TotalTokens             int64
 	CachedTokens            int64
 	CacheReadTokens         int64
 	CacheCreationTokens     int64
@@ -191,6 +193,16 @@ func costForPriceWithServiceTier(modelName, serviceTier string, tokens ModelToke
 }
 
 func calculateCostForPrice(modelName, serviceTier string, tokens ModelTokens, price model.ModelPrice) CostResult {
+	// Gemini reports thoughts outside candidates; OpenAI includes them in output.
+	// The aggregate total preserves that distinction even for mixed protocols.
+	remaining := maxInt64(tokens.TotalTokens, 0) - maxInt64(tokens.InputTokens, 0)
+	if remaining > tokens.OutputTokens && tokens.ReasoningTokens > 0 {
+		extra := clampTokens(remaining-tokens.OutputTokens, tokens.ReasoningTokens)
+		tokens.OutputTokens += extra
+		if tokens.LongInputTokens == tokens.InputTokens {
+			tokens.LongOutputTokens += extra
+		}
+	}
 	normalizedTier := strings.ToLower(strings.TrimSpace(serviceTier))
 	isStandard := normalizedTier == "" || normalizedTier == "default" || normalizedTier == "standard" || normalizedTier == "auto"
 
@@ -390,7 +402,7 @@ func computeSegmentCost(
 		(float64(textOutputTokens)*completionPrice+
 			float64(imageOutputTokens)*imageCompletionPrice)*outputMultiplier/PerMillion
 
-	complete := baseComplete
+	complete := baseComplete && (tokens.ReasoningTokens <= 0 || tokens.TotalTokens > 0)
 	hasDistinctImage := (price.ImagePromptConfigured && price.ImagePrompt != promptPrice) ||
 		(price.ImageCompletionConfigured && price.ImageCompletion != completionPrice) ||
 		(price.ImageCacheReadConfigured && price.ImageCacheRead != cacheReadPrice)
