@@ -17,6 +17,8 @@ var retainedPricingColumns = []string{
 	"cache_read_tokens", "cache_creation_tokens", "normalized_total_input_tokens", "total_tokens", "latency_ms",
 	"provider", "auth_index", "source", "source_hash", "account_snapshot", "auth_label_snapshot",
 	"auth_file_snapshot", "auth_provider_snapshot", "auth_project_id_snapshot", "auth_account_id_snapshot",
+	"image_input_tokens", "image_cache_read_tokens", "image_output_tokens", "cache_creation_1h_tokens",
+	"image_tokens_known", "cache_creation_ttl_known",
 }
 
 var ErrRetainedPricingHistoryIncomplete = errors.New("retained pricing history is incomplete")

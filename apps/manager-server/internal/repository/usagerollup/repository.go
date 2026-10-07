@@ -45,6 +45,7 @@ type CatchUpResult struct {
 
 type AccountHistoryRow struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	AccountKey           string
 	AccountSnapshot      string
 	AuthLabelSnapshot    string
@@ -105,6 +106,12 @@ type eventRow struct {
 	CacheTokens           int64
 	CacheReadTokens       int64
 	CacheCreationTokens   int64
+	ImageInputTokens      int64
+	ImageCacheReadTokens  int64
+	ImageOutputTokens     int64
+	CacheCreation1hTokens int64
+	ImageTokensKnown      bool
+	CacheCreationTTLKnown bool
 	TotalTokens           int64
 }
 
@@ -324,6 +331,12 @@ func mergeStoredAccountHistoryRows(
 	long_cached_tokens,
 	long_cache_read_tokens,
 	long_cache_creation_tokens,
+	image_input_tokens,
+	image_cache_read_tokens,
+	image_output_tokens,
+	cache_creation_1h_tokens,
+	image_tokens_known,
+	cache_creation_ttl_known,
 	total_tokens,
 	first_seen_ms,
 	last_seen_ms,
@@ -358,6 +371,7 @@ func mergeRawAccountHistoryRows(
 func scanAndMergeAccountHistoryRows(rows *sql.Rows, grouped map[accountRollupKey]*AccountHistoryRow) error {
 	for rows.Next() {
 		var row AccountHistoryRow
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.AccountKey,
 			&row.AccountSnapshot,
@@ -383,6 +397,12 @@ func scanAndMergeAccountHistoryRows(rows *sql.Rows, grouped map[accountRollupKey
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.FirstSeenMS,
 			&row.LastSeenMS,
@@ -390,6 +410,8 @@ func scanAndMergeAccountHistoryRows(rows *sql.Rows, grouped map[accountRollupKey
 		); err != nil {
 			return err
 		}
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		mergeAccountHistoryRow(grouped, row)
 	}
 	return rows.Err()
@@ -423,6 +445,12 @@ func mergeAccountHistoryRow(grouped map[accountRollupKey]*AccountHistoryRow, row
 	entry.LongCachedTokens += row.LongCachedTokens
 	entry.LongCacheReadTokens += row.LongCacheReadTokens
 	entry.LongCacheCreationTokens += row.LongCacheCreationTokens
+	entry.ImageInputTokens += row.ImageInputTokens
+	entry.ImageCacheReadTokens += row.ImageCacheReadTokens
+	entry.ImageOutputTokens += row.ImageOutputTokens
+	entry.CacheCreation1hTokens += row.CacheCreation1hTokens
+	entry.ImageTokensKnown = entry.ImageTokensKnown && row.ImageTokensKnown
+	entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	entry.TotalTokens += row.TotalTokens
 	if row.FirstSeenMS < entry.FirstSeenMS {
 		entry.FirstSeenMS = row.FirstSeenMS
@@ -589,6 +617,12 @@ func eventsAfterCheckpoint(ctx context.Context, tx *sql.Tx, lastEventID, targetE
 	coalesce(cache_tokens, 0),
 	coalesce(cache_read_tokens, 0),
 	coalesce(cache_creation_tokens, 0),
+	coalesce(image_input_tokens, 0),
+	coalesce(image_cache_read_tokens, 0),
+	coalesce(image_output_tokens, 0),
+	coalesce(cache_creation_1h_tokens, 0),
+	coalesce(image_tokens_known, 0),
+	coalesce(cache_creation_ttl_known, 0),
 	coalesce(total_tokens, 0)
 from usage_events
 where id > ? and id <= ?
@@ -631,6 +665,12 @@ func accountHistoryEventsAfterCheckpoint(
 		coalesce(e.cache_tokens, 0),
 		coalesce(e.cache_read_tokens, 0),
 		coalesce(e.cache_creation_tokens, 0),
+		coalesce(e.image_input_tokens, 0),
+		coalesce(e.image_cache_read_tokens, 0),
+		coalesce(e.image_output_tokens, 0),
+		coalesce(e.cache_creation_1h_tokens, 0),
+		coalesce(e.image_tokens_known, 0),
+		coalesce(e.cache_creation_ttl_known, 0),
 		coalesce(e.total_tokens, 0)
 	from usage_events e
 	where e.id > ? and ` + usageidentity.SQLAccountKeyExpression("e") + ` in (` + placeholders + `)
@@ -653,6 +693,7 @@ func scanAccountHistoryEvents(rows *sql.Rows, capacity int) ([]eventRow, error) 
 	for rows.Next() {
 		var row eventRow
 		var failed int
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.ID,
 			&row.TimestampMS,
@@ -676,11 +717,19 @@ func scanAccountHistoryEvents(rows *sql.Rows, capacity int) ([]eventRow, error) 
 			&row.CacheTokens,
 			&row.CacheReadTokens,
 			&row.CacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 		); err != nil {
 			return nil, err
 		}
 		row.Failed = failed != 0
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		row.CachedTokens = usage.CompatibleCachedTokens(
 			row.CachedTokens,
 			row.CacheTokens,
@@ -749,6 +798,10 @@ func aggregateAccountHistory(events []eventRow, nowMS int64) []AccountHistoryRow
 				FirstSeenMS:          event.TimestampMS,
 				LastSeenMS:           event.TimestampMS,
 				UpdatedAtMS:          nowMS,
+				BillingTokenDetails: usage.BillingTokenDetails{
+					ImageTokensKnown:      true,
+					CacheCreationTTLKnown: true,
+				},
 			}
 			grouped[key] = row
 		}
@@ -766,6 +819,12 @@ func aggregateAccountHistory(events []eventRow, nowMS int64) []AccountHistoryRow
 		row.CacheReadTokens += event.CacheReadTokens
 		row.CacheCreationTokens += event.CacheCreationTokens
 		row.AddIfLongContext(event.InputTokens, event.OutputTokens, event.CachedTokens, event.CacheReadTokens, event.CacheCreationTokens)
+		row.ImageInputTokens += event.ImageInputTokens
+		row.ImageCacheReadTokens += event.ImageCacheReadTokens
+		row.ImageOutputTokens += event.ImageOutputTokens
+		row.CacheCreation1hTokens += event.CacheCreation1hTokens
+		row.ImageTokensKnown = row.ImageTokensKnown && event.ImageTokensKnown
+		row.CacheCreationTTLKnown = row.CacheCreationTTLKnown && event.CacheCreationTTLKnown
 		row.TotalTokens += event.TotalTokens
 		if event.TimestampMS < row.FirstSeenMS {
 			row.FirstSeenMS = event.TimestampMS
@@ -831,11 +890,17 @@ func upsertAccountRollups(ctx context.Context, tx *sql.Tx, rows []AccountHistory
 	long_cached_tokens,
 	long_cache_read_tokens,
 	long_cache_creation_tokens,
+	image_input_tokens,
+	image_cache_read_tokens,
+	image_output_tokens,
+	cache_creation_1h_tokens,
+	image_tokens_known,
+	cache_creation_ttl_known,
 	total_tokens,
 	first_seen_ms,
 	last_seen_ms,
 	updated_at_ms
-) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(account_key, model, billing_model, service_tier) do update set
 	account_snapshot = coalesce(nullif(excluded.account_snapshot, ''), usage_account_model_rollups.account_snapshot),
 	auth_label_snapshot = coalesce(nullif(excluded.auth_label_snapshot, ''), usage_account_model_rollups.auth_label_snapshot),
@@ -858,6 +923,12 @@ on conflict(account_key, model, billing_model, service_tier) do update set
 	long_cached_tokens = usage_account_model_rollups.long_cached_tokens + excluded.long_cached_tokens,
 	long_cache_read_tokens = usage_account_model_rollups.long_cache_read_tokens + excluded.long_cache_read_tokens,
 	long_cache_creation_tokens = usage_account_model_rollups.long_cache_creation_tokens + excluded.long_cache_creation_tokens,
+	image_input_tokens = usage_account_model_rollups.image_input_tokens + excluded.image_input_tokens,
+	image_cache_read_tokens = usage_account_model_rollups.image_cache_read_tokens + excluded.image_cache_read_tokens,
+	image_output_tokens = usage_account_model_rollups.image_output_tokens + excluded.image_output_tokens,
+	cache_creation_1h_tokens = usage_account_model_rollups.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
+	image_tokens_known = min(usage_account_model_rollups.image_tokens_known, excluded.image_tokens_known),
+	cache_creation_ttl_known = min(usage_account_model_rollups.cache_creation_ttl_known, excluded.cache_creation_ttl_known),
 	total_tokens = usage_account_model_rollups.total_tokens + excluded.total_tokens,
 	first_seen_ms = min(usage_account_model_rollups.first_seen_ms, excluded.first_seen_ms),
 	last_seen_ms = max(usage_account_model_rollups.last_seen_ms, excluded.last_seen_ms),
@@ -894,6 +965,12 @@ on conflict(account_key, model, billing_model, service_tier) do update set
 			row.LongCachedTokens,
 			row.LongCacheReadTokens,
 			row.LongCacheCreationTokens,
+			row.ImageInputTokens,
+			row.ImageCacheReadTokens,
+			row.ImageOutputTokens,
+			row.CacheCreation1hTokens,
+			boolToInt(row.ImageTokensKnown),
+			boolToInt(row.CacheCreationTTLKnown),
 			row.TotalTokens,
 			row.FirstSeenMS,
 			row.LastSeenMS,
@@ -903,6 +980,13 @@ on conflict(account_key, model, billing_model, service_tier) do update set
 		}
 	}
 	return nil
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func upsertCheckpoint(ctx context.Context, tx *sql.Tx, name string, lastEventID int64, updatedAtMS int64, startedAtMS int64, finishedAtMS int64, lastError string) error {

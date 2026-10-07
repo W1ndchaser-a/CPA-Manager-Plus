@@ -57,6 +57,10 @@ const RULE_PRICE_FIELDS = [
   { field: 'cache', labelKey: 'usage_stats.model_price_cache' },
   { field: 'cacheRead', labelKey: 'usage_stats.model_price_cache_read' },
   { field: 'cacheCreation', labelKey: 'usage_stats.model_price_cache_creation' },
+  { field: 'cacheCreation1h', labelKey: 'usage_stats.model_price_cache_creation_1h' },
+  { field: 'imagePrompt', labelKey: 'usage_stats.model_price_image_prompt' },
+  { field: 'imageCompletion', labelKey: 'usage_stats.model_price_image_completion' },
+  { field: 'imageCacheRead', labelKey: 'usage_stats.model_price_image_cache_read' },
 ] as const satisfies readonly { field: keyof PriceRuleDraft; labelKey: string }[];
 
 type BasePriceDraftField =
@@ -65,8 +69,11 @@ type BasePriceDraftField =
   | 'completion'
   | 'cache'
   | 'cacheRead'
-  | 'cacheCreation';
-
+  | 'cacheCreation'
+  | 'cacheCreation1h'
+  | 'imagePrompt'
+  | 'imageCompletion'
+  | 'imageCacheRead';
 const resolveErrorMessage = (error: unknown, fallback: string) => {
   const rawMessage = error instanceof Error ? error.message : String(error || fallback);
   return rawMessage === 'model_price_sync_requires_usage_service'
@@ -318,6 +325,53 @@ export function ModelPricesPage() {
       serviceTiers: previous.serviceTiers.filter((_tier, tierIndex) => tierIndex !== index),
     }));
   };
+  const addServiceTierContextTier = (serviceTierIndex: number) => {
+    setDraft((previous) => ({
+      ...previous,
+      serviceTiers: previous.serviceTiers.map((tier, idx) =>
+        idx === serviceTierIndex
+          ? { ...tier, contextTiers: [...(tier.contextTiers ?? []), createEmptyContextTierDraft()] }
+          : tier
+      ),
+    }));
+  };
+
+  const updateServiceTierContextTier = (
+    serviceTierIndex: number,
+    contextTierIndex: number,
+    field: keyof ContextTierDraft,
+    value: string
+  ) => {
+    setDraft((previous) => ({
+      ...previous,
+      serviceTiers: previous.serviceTiers.map((tier, idx) =>
+        idx === serviceTierIndex
+          ? {
+              ...tier,
+              contextTiers: (tier.contextTiers ?? []).map((ct, ctIdx) =>
+                ctIdx === contextTierIndex ? { ...ct, [field]: value } : ct
+              ),
+            }
+          : tier
+      ),
+    }));
+  };
+
+  const removeServiceTierContextTier = (serviceTierIndex: number, contextTierIndex: number) => {
+    setDraft((previous) => ({
+      ...previous,
+      serviceTiers: previous.serviceTiers.map((tier, idx) =>
+        idx === serviceTierIndex
+          ? {
+              ...tier,
+              contextTiers: (tier.contextTiers ?? []).filter(
+                (_, ctIdx) => ctIdx !== contextTierIndex
+              ),
+            }
+          : tier
+      ),
+    }));
+  };
 
   const openManualEditor = (model = '', price = modelPrices[model]) => {
     setDraft(createPriceDraft(model, price));
@@ -481,6 +535,42 @@ export function ModelPricesPage() {
                 placeholder={t('model_prices.optional_price_placeholder')}
                 step="0.0001"
               />
+              <Input
+                label={`${t('usage_stats.model_price_cache_creation_1h')} ($/1M)`}
+                className={styles.compactInput}
+                type="number"
+                value={draft.cacheCreation1h}
+                onChange={(event) => setDraftField('cacheCreation1h', event.target.value)}
+                placeholder={t('model_prices.optional_price_placeholder')}
+                step="0.0001"
+              />
+              <Input
+                label={`${t('usage_stats.model_price_image_prompt')} ($/1M)`}
+                className={styles.compactInput}
+                type="number"
+                value={draft.imagePrompt}
+                onChange={(event) => setDraftField('imagePrompt', event.target.value)}
+                placeholder={t('model_prices.optional_price_placeholder')}
+                step="0.0001"
+              />
+              <Input
+                label={`${t('usage_stats.model_price_image_completion')} ($/1M)`}
+                className={styles.compactInput}
+                type="number"
+                value={draft.imageCompletion}
+                onChange={(event) => setDraftField('imageCompletion', event.target.value)}
+                placeholder={t('model_prices.optional_price_placeholder')}
+                step="0.0001"
+              />
+              <Input
+                label={`${t('usage_stats.model_price_image_cache_read')} ($/1M)`}
+                className={styles.compactInput}
+                type="number"
+                value={draft.imageCacheRead}
+                onChange={(event) => setDraftField('imageCacheRead', event.target.value)}
+                placeholder={t('model_prices.optional_price_placeholder')}
+                step="0.0001"
+              />
             </div>
             <div className={styles.compactEditorActions}>
               <Button
@@ -617,6 +707,89 @@ export function ModelPricesPage() {
                         >
                           <IconTrash2 size={14} />
                         </button>
+                        <div
+                          style={{
+                            gridColumn: '1 / -1',
+                            marginTop: 8,
+                            paddingTop: 8,
+                            borderTop: '1px dashed var(--border-color, #e2e8f0)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: 6,
+                            }}
+                          >
+                            <span style={{ fontSize: 11, fontWeight: 600 }}>
+                              {t('model_prices.service_context_rules')}
+                            </span>
+                            <Button
+                              size="xs"
+                              variant="secondary"
+                              onClick={() => addServiceTierContextTier(index)}
+                            >
+                              <IconPlus size={11} />
+                              <span>{t('model_prices.add_service_context_rule')}</span>
+                            </Button>
+                          </div>
+                          {(tier.contextTiers ?? []).map((ct, ctIndex) => (
+                            <div
+                              className={styles.contextRuleRow}
+                              key={`st-${index}-ctx-${ctIndex}`}
+                              style={{ marginBottom: 4 }}
+                            >
+                              <Input
+                                label={t('model_prices.threshold_tokens')}
+                                className={styles.compactInput}
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={ct.thresholdTokens}
+                                onChange={(event) =>
+                                  updateServiceTierContextTier(
+                                    index,
+                                    ctIndex,
+                                    'thresholdTokens',
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="272000"
+                              />
+                              {RULE_PRICE_FIELDS.map(({ field, labelKey }) => (
+                                <Input
+                                  key={field}
+                                  label={`${t(labelKey)} ($/1M)`}
+                                  className={styles.compactInput}
+                                  type="number"
+                                  min="0"
+                                  step="0.0001"
+                                  value={ct[field]}
+                                  onChange={(event) =>
+                                    updateServiceTierContextTier(
+                                      index,
+                                      ctIndex,
+                                      field,
+                                      event.target.value
+                                    )
+                                  }
+                                  placeholder={t('model_prices.inherit_price_placeholder')}
+                                />
+                              ))}
+                              <button
+                                type="button"
+                                className={styles.ruleDeleteButton}
+                                title={t('common.delete')}
+                                aria-label={t('common.delete')}
+                                onClick={() => removeServiceTierContextTier(index, ctIndex)}
+                              >
+                                <IconTrash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -720,16 +893,25 @@ export function ModelPricesPage() {
                                 row.price,
                                 tier
                               );
+                              const contextInfo = (tier.contextTiers ?? [])
+                                .map(
+                                  (ct) =>
+                                    `>${formatContextThreshold(Number(ct.thresholdTokens))}: ${formatPriceUnit(Number(ct.prompt))}/${formatPriceUnit(Number(ct.completion))}`
+                                )
+                                .join(', ');
                               return (
                                 <span
                                   key={`${tier.mode}:${tier.serviceTier}`}
                                   className={styles.tierBadge}
-                                  title={`${t('usage_stats.model_price_prompt')}: ${formatPriceUnit(effectivePrice.prompt)} · ${t('usage_stats.model_price_completion')}: ${formatPriceUnit(effectivePrice.completion)}`}
+                                  title={`${t('usage_stats.model_price_prompt')}: ${formatPriceUnit(effectivePrice.prompt)} · ${t('usage_stats.model_price_completion')}: ${formatPriceUnit(effectivePrice.completion)}${contextInfo ? ` · Context: ${contextInfo}` : ''}`}
                                 >
                                   <strong>{formatServiceTierRule(tier)}</strong>
                                   <small>
                                     {formatPriceUnit(effectivePrice.prompt)} /{' '}
                                     {formatPriceUnit(effectivePrice.completion)}
+                                    {tier.contextTiers?.length
+                                      ? ` (+${tier.contextTiers.length} ctx)`
+                                      : ''}
                                   </small>
                                 </span>
                               );

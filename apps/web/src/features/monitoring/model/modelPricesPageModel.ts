@@ -1,8 +1,9 @@
-import type {
-  ModelPrice,
-  ModelPriceContextTier,
-  ModelPricePeakWindow,
-  ModelPriceServiceTier,
+import {
+  resolveConfiguredModelPrice,
+  type ModelPrice,
+  type ModelPriceContextTier,
+  type ModelPricePeakWindow,
+  type ModelPriceServiceTier,
 } from '@/utils/usage';
 import type {
   ModelPriceUsageSummaryResponse,
@@ -18,6 +19,10 @@ export type PriceRuleDraft = {
   cache: string;
   cacheRead: string;
   cacheCreation: string;
+  imagePrompt: string;
+  imageCompletion: string;
+  imageCacheRead: string;
+  cacheCreation1h: string;
 };
 
 export type ContextTierDraft = PriceRuleDraft & {
@@ -27,8 +32,8 @@ export type ContextTierDraft = PriceRuleDraft & {
 export type ServiceTierDraft = PriceRuleDraft & {
   mode: string;
   serviceTier: string;
+  contextTiers: ContextTierDraft[];
 };
-
 export type PriceDraft = {
   model: string;
   prompt: string;
@@ -36,6 +41,10 @@ export type PriceDraft = {
   cache: string;
   cacheRead: string;
   cacheCreation: string;
+  imagePrompt: string;
+  imageCompletion: string;
+  imageCacheRead: string;
+  cacheCreation1h: string;
   contextTiers: ContextTierDraft[];
   serviceTiers: ServiceTierDraft[];
   /** Not editable in the UI yet; carried through so saving a row keeps its windows. */
@@ -48,7 +57,8 @@ export type PriceDraftValidationError =
   | 'context_price'
   | 'service_identity'
   | 'service_duplicate_identity'
-  | 'service_price';
+  | 'service_price'
+  | 'service_context_threshold';
 
 export type ModelPriceRow = {
   model: string;
@@ -79,9 +89,12 @@ export const createEmptyPriceDraft = (): PriceDraft => ({
   cache: '',
   cacheRead: '',
   cacheCreation: '',
+  imagePrompt: '',
+  imageCompletion: '',
+  imageCacheRead: '',
+  cacheCreation1h: '',
   contextTiers: [],
   serviceTiers: [],
-  peakWindows: [],
 });
 
 const createConfiguredDraftValue = (value: number | undefined, configured?: boolean): string =>
@@ -95,6 +108,10 @@ const createRulePriceDraft = (
   cache: createConfiguredDraftValue(rule.cache, rule.cacheConfigured),
   cacheRead: createConfiguredDraftValue(rule.cacheRead, rule.cacheReadConfigured),
   cacheCreation: createConfiguredDraftValue(rule.cacheCreation, rule.cacheCreationConfigured),
+  imagePrompt: createConfiguredDraftValue(rule.imagePrompt, rule.imagePromptConfigured),
+  imageCompletion: createConfiguredDraftValue(rule.imageCompletion, rule.imageCompletionConfigured),
+  imageCacheRead: createConfiguredDraftValue(rule.imageCacheRead, rule.imageCacheReadConfigured),
+  cacheCreation1h: createConfiguredDraftValue(rule.cacheCreation1h, rule.cacheCreation1hConfigured),
 });
 
 export const createEmptyContextTierDraft = (): ContextTierDraft => ({
@@ -104,6 +121,10 @@ export const createEmptyContextTierDraft = (): ContextTierDraft => ({
   cache: '',
   cacheRead: '',
   cacheCreation: '',
+  imagePrompt: '',
+  imageCompletion: '',
+  imageCacheRead: '',
+  cacheCreation1h: '',
 });
 
 export const createEmptyServiceTierDraft = (): ServiceTierDraft => ({
@@ -114,6 +135,11 @@ export const createEmptyServiceTierDraft = (): ServiceTierDraft => ({
   cache: '',
   cacheRead: '',
   cacheCreation: '',
+  imagePrompt: '',
+  imageCompletion: '',
+  imageCacheRead: '',
+  cacheCreation1h: '',
+  contextTiers: [],
 });
 
 export const createPriceDraft = (model: string, price?: ModelPrice): PriceDraft => ({
@@ -125,6 +151,18 @@ export const createPriceDraft = (model: string, price?: ModelPrice): PriceDraft 
   cacheCreation: price
     ? createConfiguredDraftValue(price.cacheCreation, price.cacheCreationConfigured)
     : '',
+  imagePrompt: price
+    ? createConfiguredDraftValue(price.imagePrompt, price.imagePromptConfigured)
+    : '',
+  imageCompletion: price
+    ? createConfiguredDraftValue(price.imageCompletion, price.imageCompletionConfigured)
+    : '',
+  imageCacheRead: price
+    ? createConfiguredDraftValue(price.imageCacheRead, price.imageCacheReadConfigured)
+    : '',
+  cacheCreation1h: price
+    ? createConfiguredDraftValue(price.cacheCreation1h, price.cacheCreation1hConfigured)
+    : '',
   contextTiers: (price?.contextTiers ?? []).map((tier) => ({
     thresholdTokens: String(tier.thresholdTokens),
     ...createRulePriceDraft(tier),
@@ -133,11 +171,16 @@ export const createPriceDraft = (model: string, price?: ModelPrice): PriceDraft 
     mode: tier.mode,
     serviceTier: tier.serviceTier,
     ...createRulePriceDraft(tier),
+    contextTiers: (tier.contextTiers ?? []).map((ct) => ({
+      thresholdTokens: String(ct.thresholdTokens),
+      ...createRulePriceDraft(ct),
+    })),
   })),
   peakWindows: price?.peakWindows ?? [],
 });
 
-export const parsePriceValue = (value: string) => {
+export const parsePriceValue = (value?: string) => {
+  if (value === undefined || value === null) return 0;
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 };
@@ -148,14 +191,18 @@ const PRICE_RULE_FIELDS = [
   'cache',
   'cacheRead',
   'cacheCreation',
+  'imagePrompt',
+  'imageCompletion',
+  'imageCacheRead',
+  'cacheCreation1h',
 ] as const satisfies readonly (keyof PriceRuleDraft)[];
 
 const hasConfiguredRulePrice = (draft: PriceRuleDraft) =>
-  PRICE_RULE_FIELDS.some((field) => draft[field].trim() !== '');
+  PRICE_RULE_FIELDS.some((field) => String(draft[field] ?? '').trim() !== '');
 
 const hasInvalidRulePrice = (draft: PriceRuleDraft) =>
   PRICE_RULE_FIELDS.some((field) => {
-    const value = draft[field].trim();
+    const value = String(draft[field] ?? '').trim();
     if (!value) return false;
     const parsed = Number(value);
     return !Number.isFinite(parsed) || parsed < 0;
@@ -181,7 +228,17 @@ export const validatePriceDraft = (draft: PriceDraft): PriceDraftValidationError
     }
     serviceIdentifiers.add(mode);
     serviceIdentifiers.add(serviceTier);
-    if (!hasConfiguredRulePrice(tier) || hasInvalidRulePrice(tier)) return 'service_price';
+    if (!hasConfiguredRulePrice(tier) && (!tier.contextTiers || tier.contextTiers.length === 0)) {
+      return 'service_price';
+    }
+    if (hasInvalidRulePrice(tier)) return 'service_price';
+    for (const sct of tier.contextTiers ?? []) {
+      const threshold = Number(sct.thresholdTokens);
+      if (!Number.isSafeInteger(threshold) || threshold <= 0 || !contextThresholds.has(threshold)) {
+        return 'service_context_threshold';
+      }
+      if (!hasConfiguredRulePrice(sct) || hasInvalidRulePrice(sct)) return 'service_price';
+    }
   }
   return null;
 };
@@ -192,11 +249,19 @@ const buildRulePrice = (draft: PriceRuleDraft) => ({
   cache: parsePriceValue(draft.cache),
   cacheRead: parsePriceValue(draft.cacheRead),
   cacheCreation: parsePriceValue(draft.cacheCreation),
-  promptConfigured: draft.prompt.trim() !== '',
-  completionConfigured: draft.completion.trim() !== '',
-  cacheConfigured: draft.cache.trim() !== '',
-  cacheReadConfigured: draft.cacheRead.trim() !== '',
-  cacheCreationConfigured: draft.cacheCreation.trim() !== '',
+  imagePrompt: parsePriceValue(draft.imagePrompt),
+  imageCompletion: parsePriceValue(draft.imageCompletion),
+  imageCacheRead: parsePriceValue(draft.imageCacheRead),
+  cacheCreation1h: parsePriceValue(draft.cacheCreation1h),
+  promptConfigured: String(draft.prompt ?? '').trim() !== '',
+  completionConfigured: String(draft.completion ?? '').trim() !== '',
+  cacheConfigured: String(draft.cache ?? '').trim() !== '',
+  cacheReadConfigured: String(draft.cacheRead ?? '').trim() !== '',
+  cacheCreationConfigured: String(draft.cacheCreation ?? '').trim() !== '',
+  imagePromptConfigured: String(draft.imagePrompt ?? '').trim() !== '',
+  imageCompletionConfigured: String(draft.imageCompletion ?? '').trim() !== '',
+  imageCacheReadConfigured: String(draft.imageCacheRead ?? '').trim() !== '',
+  cacheCreation1hConfigured: String(draft.cacheCreation1h ?? '').trim() !== '',
 });
 
 export const buildPriceFromDraft = (draft: PriceDraft): ModelPrice | null => {
@@ -204,17 +269,25 @@ export const buildPriceFromDraft = (draft: PriceDraft): ModelPrice | null => {
   if (!model || validatePriceDraft(draft)) return null;
   const prompt = parsePriceValue(draft.prompt);
   const completion = parsePriceValue(draft.completion);
-  const cache = draft.cache.trim() === '' ? prompt : parsePriceValue(draft.cache);
+  const cache = String(draft.cache ?? '').trim() === '' ? prompt : parsePriceValue(draft.cache);
   return {
     prompt,
     completion,
     cache,
     cacheRead: parsePriceValue(draft.cacheRead),
     cacheCreation: parsePriceValue(draft.cacheCreation),
-    promptConfigured: draft.prompt.trim() !== '',
-    completionConfigured: draft.completion.trim() !== '',
-    cacheReadConfigured: draft.cacheRead.trim() !== '',
-    cacheCreationConfigured: draft.cacheCreation.trim() !== '',
+    imagePrompt: parsePriceValue(draft.imagePrompt),
+    imageCompletion: parsePriceValue(draft.imageCompletion),
+    imageCacheRead: parsePriceValue(draft.imageCacheRead),
+    cacheCreation1h: parsePriceValue(draft.cacheCreation1h),
+    promptConfigured: String(draft.prompt ?? '').trim() !== '',
+    completionConfigured: String(draft.completion ?? '').trim() !== '',
+    cacheReadConfigured: String(draft.cacheRead ?? '').trim() !== '',
+    cacheCreationConfigured: String(draft.cacheCreation ?? '').trim() !== '',
+    imagePromptConfigured: String(draft.imagePrompt ?? '').trim() !== '',
+    imageCompletionConfigured: String(draft.imageCompletion ?? '').trim() !== '',
+    imageCacheReadConfigured: String(draft.imageCacheRead ?? '').trim() !== '',
+    cacheCreation1hConfigured: String(draft.cacheCreation1h ?? '').trim() !== '',
     source: 'manual',
     contextTiers: draft.contextTiers
       .map((tier) => ({
@@ -227,6 +300,14 @@ export const buildPriceFromDraft = (draft: PriceDraft): ModelPrice | null => {
         mode: tier.mode.trim().toLowerCase(),
         serviceTier: tier.serviceTier.trim().toLowerCase(),
         ...buildRulePrice(tier),
+        contextTiers: tier.contextTiers?.length
+          ? tier.contextTiers
+              .map((ct) => ({
+                thresholdTokens: Number(ct.thresholdTokens),
+                ...buildRulePrice(ct),
+              }))
+              .sort((a, b) => a.thresholdTokens - b.thresholdTokens)
+          : undefined,
       }))
       .sort(
         (left, right) =>
@@ -308,7 +389,7 @@ export const buildModelPriceRows = (
   const ensureRow = (model: string): ModelPriceRow => {
     const existing = rowMap.get(model);
     if (existing) return existing;
-    const price = prices[model];
+    const price = resolveConfiguredModelPrice(model, prices);
     const row: ModelPriceRow = {
       model,
       calls: 0,

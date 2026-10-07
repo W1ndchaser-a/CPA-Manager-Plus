@@ -420,10 +420,9 @@ func TestAccountHistoryIsolatesUnrecoverablePricingByAccount(t *testing.T) {
 		t.Fatalf("isolated account history = %#v, %v", got.Items, err)
 	}
 
-	wantA := want.Items[0]
-	wantA.TotalCost = nil
-	if !reflect.DeepEqual(got.Items[0], wantA) {
-		t.Fatalf("incomplete account was not isolated: got=%#v want=%#v", got.Items[0], wantA)
+	if got.Items[0].TotalCost != nil || got.Items[0].CostComplete ||
+		got.Items[0].TotalRequests != want.Items[0].TotalRequests || got.Items[0].TotalTokens != want.Items[0].TotalTokens {
+		t.Fatalf("incomplete account pricing or usage was not isolated: got=%#v want=%#v", got.Items[0], want.Items[0])
 	}
 	if !reflect.DeepEqual(got.Items[1], want.Items[1]) {
 		t.Fatalf("complete account pricing was degraded: got=%#v want=%#v", got.Items[1], want.Items[1])

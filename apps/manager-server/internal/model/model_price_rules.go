@@ -24,36 +24,54 @@ const (
 // than ThresholdTokens. Configured flags distinguish a missing override from
 // an explicit zero price.
 type ModelPriceContextTier struct {
-	ThresholdTokens         int64   `json:"thresholdTokens"`
-	Prompt                  float64 `json:"prompt"`
-	Completion              float64 `json:"completion"`
-	Cache                   float64 `json:"cache"`
-	CacheRead               float64 `json:"cacheRead,omitempty"`
-	CacheCreation           float64 `json:"cacheCreation,omitempty"`
-	PromptConfigured        bool    `json:"promptConfigured,omitempty"`
-	CompletionConfigured    bool    `json:"completionConfigured,omitempty"`
-	CacheConfigured         bool    `json:"cacheConfigured,omitempty"`
-	CacheReadConfigured     bool    `json:"cacheReadConfigured,omitempty"`
-	CacheCreationConfigured bool    `json:"cacheCreationConfigured,omitempty"`
+	ThresholdTokens           int64   `json:"thresholdTokens"`
+	Prompt                    float64 `json:"prompt"`
+	Completion                float64 `json:"completion"`
+	Cache                     float64 `json:"cache"`
+	CacheRead                 float64 `json:"cacheRead,omitempty"`
+	CacheCreation             float64 `json:"cacheCreation,omitempty"`
+	ImagePrompt               float64 `json:"imagePrompt,omitempty"`
+	ImageCompletion           float64 `json:"imageCompletion,omitempty"`
+	ImageCacheRead            float64 `json:"imageCacheRead,omitempty"`
+	CacheCreation1h           float64 `json:"cacheCreation1h,omitempty"`
+	PromptConfigured          bool    `json:"promptConfigured,omitempty"`
+	CompletionConfigured      bool    `json:"completionConfigured,omitempty"`
+	CacheConfigured           bool    `json:"cacheConfigured,omitempty"`
+	CacheReadConfigured       bool    `json:"cacheReadConfigured,omitempty"`
+	CacheCreationConfigured   bool    `json:"cacheCreationConfigured,omitempty"`
+	ImagePromptConfigured     bool    `json:"imagePromptConfigured,omitempty"`
+	ImageCompletionConfigured bool    `json:"imageCompletionConfigured,omitempty"`
+	ImageCacheReadConfigured  bool    `json:"imageCacheReadConfigured,omitempty"`
+	CacheCreation1hConfigured bool    `json:"cacheCreation1hConfigured,omitempty"`
 }
 
 // ModelPriceServiceTier is a complete or partial price override for a
 // provider mode and its emitted service tier. Mode matches source-side names
 // such as "fast", while ServiceTier matches usage values such as "priority".
 // Configured flags distinguish missing overrides from explicit zero prices.
+// ContextTiers contains context-threshold overrides specific to this service tier.
 type ModelPriceServiceTier struct {
-	Mode                    string  `json:"mode"`
-	ServiceTier             string  `json:"serviceTier"`
-	Prompt                  float64 `json:"prompt"`
-	Completion              float64 `json:"completion"`
-	Cache                   float64 `json:"cache"`
-	CacheRead               float64 `json:"cacheRead,omitempty"`
-	CacheCreation           float64 `json:"cacheCreation,omitempty"`
-	PromptConfigured        bool    `json:"promptConfigured,omitempty"`
-	CompletionConfigured    bool    `json:"completionConfigured,omitempty"`
-	CacheConfigured         bool    `json:"cacheConfigured,omitempty"`
-	CacheReadConfigured     bool    `json:"cacheReadConfigured,omitempty"`
-	CacheCreationConfigured bool    `json:"cacheCreationConfigured,omitempty"`
+	Mode                      string                  `json:"mode"`
+	ServiceTier               string                  `json:"serviceTier"`
+	Prompt                    float64                 `json:"prompt"`
+	Completion                float64                 `json:"completion"`
+	Cache                     float64                 `json:"cache"`
+	CacheRead                 float64                 `json:"cacheRead,omitempty"`
+	CacheCreation             float64                 `json:"cacheCreation,omitempty"`
+	ImagePrompt               float64                 `json:"imagePrompt,omitempty"`
+	ImageCompletion           float64                 `json:"imageCompletion,omitempty"`
+	ImageCacheRead            float64                 `json:"imageCacheRead,omitempty"`
+	CacheCreation1h           float64                 `json:"cacheCreation1h,omitempty"`
+	PromptConfigured          bool                    `json:"promptConfigured,omitempty"`
+	CompletionConfigured      bool                    `json:"completionConfigured,omitempty"`
+	CacheConfigured           bool                    `json:"cacheConfigured,omitempty"`
+	CacheReadConfigured       bool                    `json:"cacheReadConfigured,omitempty"`
+	CacheCreationConfigured   bool                    `json:"cacheCreationConfigured,omitempty"`
+	ImagePromptConfigured     bool                    `json:"imagePromptConfigured,omitempty"`
+	ImageCompletionConfigured bool                    `json:"imageCompletionConfigured,omitempty"`
+	ImageCacheReadConfigured  bool                    `json:"imageCacheReadConfigured,omitempty"`
+	CacheCreation1hConfigured bool                    `json:"cacheCreation1hConfigured,omitempty"`
+	ContextTiers              []ModelPriceContextTier `json:"contextTiers,omitempty"`
 }
 
 // ModelPriceServiceTierPeak is the service tier that usage events receive when
@@ -91,11 +109,18 @@ func NormalizeModelPriceContextTiers(tiers []ModelPriceContextTier) ([]ModelPric
 			!validModelPriceRuleValue(tier.Completion) ||
 			!validModelPriceRuleValue(tier.Cache) ||
 			!validModelPriceRuleValue(tier.CacheRead) ||
-			!validModelPriceRuleValue(tier.CacheCreation) {
+			!validModelPriceRuleValue(tier.CacheCreation) ||
+			!validModelPriceRuleValue(tier.ImagePrompt) ||
+			!validModelPriceRuleValue(tier.ImageCompletion) ||
+			!validModelPriceRuleValue(tier.ImageCacheRead) ||
+			!validModelPriceRuleValue(tier.CacheCreation1h) {
 			return nil, fmt.Errorf("invalid context tier price at threshold %d", tier.ThresholdTokens)
 		}
-		if !tier.PromptConfigured && !tier.CompletionConfigured && !tier.CacheConfigured &&
-			!tier.CacheReadConfigured && !tier.CacheCreationConfigured {
+		hasConfigured := tier.PromptConfigured || tier.CompletionConfigured || tier.CacheConfigured ||
+			tier.CacheReadConfigured || tier.CacheCreationConfigured ||
+			tier.ImagePromptConfigured || tier.ImageCompletionConfigured ||
+			tier.ImageCacheReadConfigured || tier.CacheCreation1hConfigured
+		if !hasConfigured {
 			return nil, fmt.Errorf("context tier at threshold %d has no configured prices", tier.ThresholdTokens)
 		}
 	}
@@ -169,6 +194,22 @@ func applyModelPriceContextTier(price ModelPrice, tier ModelPriceContextTier) Mo
 		effective.CacheCreation = tier.CacheCreation
 		effective.CacheCreationConfigured = true
 	}
+	if tier.ImagePromptConfigured {
+		effective.ImagePrompt = tier.ImagePrompt
+		effective.ImagePromptConfigured = true
+	}
+	if tier.ImageCompletionConfigured {
+		effective.ImageCompletion = tier.ImageCompletion
+		effective.ImageCompletionConfigured = true
+	}
+	if tier.ImageCacheReadConfigured {
+		effective.ImageCacheRead = tier.ImageCacheRead
+		effective.ImageCacheReadConfigured = true
+	}
+	if tier.CacheCreation1hConfigured {
+		effective.CacheCreation1h = tier.CacheCreation1h
+		effective.CacheCreation1hConfigured = true
+	}
 	return effective
 }
 
@@ -192,11 +233,26 @@ func NormalizeModelPriceServiceTiers(tiers []ModelPriceServiceTier) ([]ModelPric
 			!validModelPriceRuleValue(tier.Completion) ||
 			!validModelPriceRuleValue(tier.Cache) ||
 			!validModelPriceRuleValue(tier.CacheRead) ||
-			!validModelPriceRuleValue(tier.CacheCreation) {
+			!validModelPriceRuleValue(tier.CacheCreation) ||
+			!validModelPriceRuleValue(tier.ImagePrompt) ||
+			!validModelPriceRuleValue(tier.ImageCompletion) ||
+			!validModelPriceRuleValue(tier.ImageCacheRead) ||
+			!validModelPriceRuleValue(tier.CacheCreation1h) {
 			return nil, fmt.Errorf("invalid service tier price for %s/%s", tier.Mode, tier.ServiceTier)
 		}
-		if !tier.PromptConfigured && !tier.CompletionConfigured && !tier.CacheConfigured &&
-			!tier.CacheReadConfigured && !tier.CacheCreationConfigured {
+		if len(tier.ContextTiers) > 0 {
+			var err error
+			tier.ContextTiers, err = NormalizeModelPriceContextTiers(tier.ContextTiers)
+			if err != nil {
+				return nil, fmt.Errorf("invalid context tiers for service tier %s/%s: %w", tier.Mode, tier.ServiceTier, err)
+			}
+		}
+		hasConfigured := tier.PromptConfigured || tier.CompletionConfigured || tier.CacheConfigured ||
+			tier.CacheReadConfigured || tier.CacheCreationConfigured ||
+			tier.ImagePromptConfigured || tier.ImageCompletionConfigured ||
+			tier.ImageCacheReadConfigured || tier.CacheCreation1hConfigured ||
+			len(tier.ContextTiers) > 0
+		if !hasConfigured {
 			return nil, fmt.Errorf("service tier %s/%s has no configured prices", tier.Mode, tier.ServiceTier)
 		}
 		for _, identifier := range []string{tier.Mode, tier.ServiceTier} {
@@ -260,7 +316,69 @@ func ModelPriceForServiceTier(price ModelPrice, serviceTier string) (ModelPrice,
 		effective.CacheCreation = tier.CacheCreation
 		effective.CacheCreationConfigured = true
 	}
+	if tier.ImagePromptConfigured {
+		effective.ImagePrompt = tier.ImagePrompt
+		effective.ImagePromptConfigured = true
+	}
+	if tier.ImageCompletionConfigured {
+		effective.ImageCompletion = tier.ImageCompletion
+		effective.ImageCompletionConfigured = true
+	}
+	if tier.ImageCacheReadConfigured {
+		effective.ImageCacheRead = tier.ImageCacheRead
+		effective.ImageCacheReadConfigured = true
+	}
+	if tier.CacheCreation1hConfigured {
+		effective.CacheCreation1h = tier.CacheCreation1h
+		effective.CacheCreation1hConfigured = true
+	}
+	if len(tier.ContextTiers) > 0 {
+		effective.ContextTiers = append([]ModelPriceContextTier(nil), tier.ContextTiers...)
+	}
 	return effective, true
+}
+
+// ModelPriceForServiceTierAndContext resolves the effective price given a service tier
+// and context threshold. It returns the resolved price, whether an explicit rule was matched,
+// and whether the resolution was complete/deterministic (false if unsupported/unquoted tier combination).
+func ModelPriceForServiceTierAndContext(price ModelPrice, serviceTier string, thresholdTokens int64) (ModelPrice, bool, bool) {
+	serviceTier = strings.ToLower(strings.TrimSpace(serviceTier))
+	if serviceTier == "" || serviceTier == "default" || serviceTier == "standard" || serviceTier == "auto" {
+		if thresholdTokens > 0 {
+			tierPrice, ok := ModelPriceForContextThreshold(price, thresholdTokens)
+			if ok {
+				return tierPrice, true, true
+			}
+			return price, false, false
+		}
+		return price, true, true
+	}
+
+	st, hasST := SelectModelPriceServiceTier(price, serviceTier)
+	if hasST {
+		baseST, _ := ModelPriceForServiceTier(price, serviceTier)
+		if thresholdTokens > 0 {
+			if len(st.ContextTiers) > 0 {
+				for _, ct := range st.ContextTiers {
+					if ct.ThresholdTokens == thresholdTokens {
+						return applyModelPriceContextTier(baseST, ct), true, true
+					}
+				}
+			}
+			if _, hasBase := ModelPriceForContextThreshold(price, thresholdTokens); hasBase {
+				return ModelPrice{}, true, false
+			}
+			return baseST, true, true
+		}
+		return baseST, true, true
+	}
+
+	if thresholdTokens > 0 {
+		if baseTier, ok := ModelPriceForContextThreshold(price, thresholdTokens); ok {
+			return baseTier, false, false
+		}
+	}
+	return price, false, false
 }
 
 // ModelPriceStructureRevision changes only when the set of priced model IDs or
@@ -315,16 +433,31 @@ func ValidateModelPrice(modelID string, price ModelPrice) error {
 		!validModelPriceRuleValue(price.Completion) ||
 		!validModelPriceRuleValue(price.Cache) ||
 		!validModelPriceRuleValue(price.CacheRead) ||
-		!validModelPriceRuleValue(price.CacheCreation) {
+		!validModelPriceRuleValue(price.CacheCreation) ||
+		!validModelPriceRuleValue(price.ImagePrompt) ||
+		!validModelPriceRuleValue(price.ImageCompletion) ||
+		!validModelPriceRuleValue(price.ImageCacheRead) ||
+		!validModelPriceRuleValue(price.CacheCreation1h) {
 		return fmt.Errorf("invalid model price for %s", modelID)
 	}
 	_, err := NormalizeModelPriceContextTiers(price.ContextTiers)
 	if err != nil {
 		return fmt.Errorf("invalid model price for %s: %w", modelID, err)
 	}
-	_, err = NormalizeModelPriceServiceTiers(price.ServiceTiers)
+	normalizedServiceTiers, err := NormalizeModelPriceServiceTiers(price.ServiceTiers)
 	if err != nil {
 		return fmt.Errorf("invalid model price for %s: %w", modelID, err)
+	}
+	baseThresholds := make(map[int64]struct{}, len(price.ContextTiers))
+	for _, bt := range price.ContextTiers {
+		baseThresholds[bt.ThresholdTokens] = struct{}{}
+	}
+	for _, st := range normalizedServiceTiers {
+		for _, sct := range st.ContextTiers {
+			if _, ok := baseThresholds[sct.ThresholdTokens]; !ok {
+				return fmt.Errorf("invalid model price for %s: service tier %s/%s context tier threshold %d must match a base context tier threshold", modelID, st.Mode, st.ServiceTier, sct.ThresholdTokens)
+			}
+		}
 	}
 	windows, err := NormalizeModelPricePeakWindows(price.PeakWindows)
 	if err != nil {
