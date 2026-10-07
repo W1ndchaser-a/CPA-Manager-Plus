@@ -507,71 +507,69 @@ export function ModelPricesPage() {
               step="0.0001"
               data-testid="draft-output-price"
             />
-            <div style={{ display: 'grid', gap: 8 }}>
-              <Input
-                label={`${t('usage_stats.model_price_cache')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.cache}
-                onChange={(event) => setDraftField('cache', event.target.value)}
-                placeholder="0.0000"
-                step="0.0001"
-              />
-              <Input
-                label={`${t('usage_stats.model_price_cache_read')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.cacheRead}
-                onChange={(event) => setDraftField('cacheRead', event.target.value)}
-                placeholder={t('model_prices.optional_price_placeholder')}
-                step="0.0001"
-              />
-              <Input
-                label={`${t('usage_stats.model_price_cache_creation')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.cacheCreation}
-                onChange={(event) => setDraftField('cacheCreation', event.target.value)}
-                placeholder={t('model_prices.optional_price_placeholder')}
-                step="0.0001"
-              />
-              <Input
-                label={`${t('usage_stats.model_price_cache_creation_1h')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.cacheCreation1h}
-                onChange={(event) => setDraftField('cacheCreation1h', event.target.value)}
-                placeholder={t('model_prices.optional_price_placeholder')}
-                step="0.0001"
-              />
-              <Input
-                label={`${t('usage_stats.model_price_image_prompt')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.imagePrompt}
-                onChange={(event) => setDraftField('imagePrompt', event.target.value)}
-                placeholder={t('model_prices.optional_price_placeholder')}
-                step="0.0001"
-              />
-              <Input
-                label={`${t('usage_stats.model_price_image_completion')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.imageCompletion}
-                onChange={(event) => setDraftField('imageCompletion', event.target.value)}
-                placeholder={t('model_prices.optional_price_placeholder')}
-                step="0.0001"
-              />
-              <Input
-                label={`${t('usage_stats.model_price_image_cache_read')} ($/1M)`}
-                className={styles.compactInput}
-                type="number"
-                value={draft.imageCacheRead}
-                onChange={(event) => setDraftField('imageCacheRead', event.target.value)}
-                placeholder={t('model_prices.optional_price_placeholder')}
-                step="0.0001"
-              />
-            </div>
+            <Input
+              label={`${t('usage_stats.model_price_cache')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.cache}
+              onChange={(event) => setDraftField('cache', event.target.value)}
+              placeholder="0.0000"
+              step="0.0001"
+            />
+            <Input
+              label={`${t('usage_stats.model_price_cache_read')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.cacheRead}
+              onChange={(event) => setDraftField('cacheRead', event.target.value)}
+              placeholder={t('model_prices.optional_price_placeholder')}
+              step="0.0001"
+            />
+            <Input
+              label={`${t('usage_stats.model_price_cache_creation')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.cacheCreation}
+              onChange={(event) => setDraftField('cacheCreation', event.target.value)}
+              placeholder={t('model_prices.optional_price_placeholder')}
+              step="0.0001"
+            />
+            <Input
+              label={`${t('usage_stats.model_price_cache_creation_1h')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.cacheCreation1h}
+              onChange={(event) => setDraftField('cacheCreation1h', event.target.value)}
+              placeholder={t('model_prices.optional_price_placeholder')}
+              step="0.0001"
+            />
+            <Input
+              label={`${t('usage_stats.model_price_image_prompt')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.imagePrompt}
+              onChange={(event) => setDraftField('imagePrompt', event.target.value)}
+              placeholder={t('model_prices.optional_price_placeholder')}
+              step="0.0001"
+            />
+            <Input
+              label={`${t('usage_stats.model_price_image_completion')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.imageCompletion}
+              onChange={(event) => setDraftField('imageCompletion', event.target.value)}
+              placeholder={t('model_prices.optional_price_placeholder')}
+              step="0.0001"
+            />
+            <Input
+              label={`${t('usage_stats.model_price_image_cache_read')} ($/1M)`}
+              className={styles.compactInput}
+              type="number"
+              value={draft.imageCacheRead}
+              onChange={(event) => setDraftField('imageCacheRead', event.target.value)}
+              placeholder={t('model_prices.optional_price_placeholder')}
+              step="0.0001"
+            />
             <div className={styles.compactEditorActions}>
               <Button
                 size="xs"
