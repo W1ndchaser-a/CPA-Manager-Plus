@@ -112,6 +112,7 @@ type APIKeySelectorValue struct {
 
 type TimelinePoint struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	BucketMS            int64
 	Model               string
@@ -139,6 +140,7 @@ type HourlyPoint struct {
 
 type HeatmapPoint struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	Weekday             int
 	Hour                int
@@ -160,6 +162,7 @@ type HeatmapPoint struct {
 
 type ChannelModelStat struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	AuthIndex             string
 	Source                string
@@ -198,6 +201,7 @@ type FailureSourceStat struct {
 
 type AccountModelStat struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	AccountSnapshot              string
 	AuthLabelSnapshot            string
@@ -249,6 +253,7 @@ type AccountWindowUsageQuery struct {
 
 type AccountWindowModelStat struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	RequestIndex        int
 	Model               string
@@ -268,6 +273,7 @@ type AccountWindowModelStat struct {
 
 type CredentialModelStat struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	ID                    string
 	AuthFileSnapshot      string
@@ -298,6 +304,7 @@ type CredentialModelStat struct {
 
 type CredentialTimelinePoint struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	ID                    string
 	AuthFileSnapshot      string
@@ -329,6 +336,7 @@ type CredentialTimelinePoint struct {
 
 type APIKeyTimelinePoint struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	APIKeyHash          string
 	BucketMS            int64
@@ -351,6 +359,7 @@ type APIKeyTimelinePoint struct {
 
 type APIKeyModelStat struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	APIKeyHash            string
 	AccountSnapshot       string
@@ -378,6 +387,7 @@ type APIKeyModelStat struct {
 }
 
 type TaskBucket struct {
+	usage.BillingTokenDetails
 	BucketKey           string
 	Total               int64
 	Success             int64

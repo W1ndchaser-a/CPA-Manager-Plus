@@ -94,6 +94,12 @@ const (
 		long_cached_tokens integer not null default 0,
 		long_cache_read_tokens integer not null default 0,
 		long_cache_creation_tokens integer not null default 0,
+		image_input_tokens integer not null default 0,
+		image_cache_read_tokens integer not null default 0,
+		image_output_tokens integer not null default 0,
+		cache_creation_1h_tokens integer not null default 0,
+		image_tokens_known integer not null default 0,
+		cache_creation_ttl_known integer not null default 0,
 		total_tokens integer not null default 0,
 		first_seen_ms integer not null,
 		last_seen_ms integer not null,
@@ -129,6 +135,12 @@ const (
 		long_cached_tokens integer not null default 0,
 		long_cache_read_tokens integer not null default 0,
 		long_cache_creation_tokens integer not null default 0,
+		image_input_tokens integer not null default 0,
+		image_cache_read_tokens integer not null default 0,
+		image_output_tokens integer not null default 0,
+		cache_creation_1h_tokens integer not null default 0,
+		image_tokens_known integer not null default 0,
+		cache_creation_ttl_known integer not null default 0,
 		total_tokens integer not null default 0,
 		first_seen_ms integer not null,
 		last_seen_ms integer not null,
@@ -158,6 +170,12 @@ const (
 		long_cached_tokens integer not null default 0,
 		long_cache_read_tokens integer not null default 0,
 		long_cache_creation_tokens integer not null default 0,
+		image_input_tokens integer not null default 0,
+		image_cache_read_tokens integer not null default 0,
+		image_output_tokens integer not null default 0,
+		cache_creation_1h_tokens integer not null default 0,
+		image_tokens_known integer not null default 0,
+		cache_creation_ttl_known integer not null default 0,
 		total_tokens integer not null default 0,
 		latency_sum_ms integer not null default 0,
 		latency_samples integer not null default 0,
@@ -184,6 +202,12 @@ const (
 		long_cached_tokens integer not null default 0,
 		long_cache_read_tokens integer not null default 0,
 		long_cache_creation_tokens integer not null default 0,
+		image_input_tokens integer not null default 0,
+		image_cache_read_tokens integer not null default 0,
+		image_output_tokens integer not null default 0,
+		cache_creation_1h_tokens integer not null default 0,
+		image_tokens_known integer not null default 0,
+		cache_creation_ttl_known integer not null default 0,
 		total_tokens integer not null default 0,
 		latency_sum_ms integer not null default 0,
 		latency_samples integer not null default 0,
@@ -270,6 +294,12 @@ func Migrate(db *sql.DB) error {
 			cache_tokens integer not null default 0,
 			cache_read_tokens integer not null default 0,
 			cache_creation_tokens integer not null default 0,
+			image_input_tokens integer not null default 0,
+			image_cache_read_tokens integer not null default 0,
+			image_output_tokens integer not null default 0,
+			cache_creation_1h_tokens integer not null default 0,
+			image_tokens_known integer not null default 0,
+			cache_creation_ttl_known integer not null default 0,
 			normalized_uncached_input_tokens integer,
 			normalized_total_input_tokens integer,
 			normalized_cache_read_tokens integer,
@@ -346,6 +376,12 @@ func Migrate(db *sql.DB) error {
 			long_cached_tokens integer not null default 0,
 			long_cache_read_tokens integer not null default 0,
 			long_cache_creation_tokens integer not null default 0,
+			image_input_tokens integer not null default 0,
+			image_cache_read_tokens integer not null default 0,
+			image_output_tokens integer not null default 0,
+			cache_creation_1h_tokens integer not null default 0,
+			image_tokens_known integer not null default 0,
+			cache_creation_ttl_known integer not null default 0,
 			total_tokens integer not null default 0,
 			latency_sum_ms integer not null default 0,
 			latency_samples integer not null default 0,
@@ -410,6 +446,12 @@ func Migrate(db *sql.DB) error {
 			long_cached_tokens integer not null default 0,
 			long_cache_read_tokens integer not null default 0,
 			long_cache_creation_tokens integer not null default 0,
+			image_input_tokens integer not null default 0,
+			image_cache_read_tokens integer not null default 0,
+			image_output_tokens integer not null default 0,
+			cache_creation_1h_tokens integer not null default 0,
+			image_tokens_known integer not null default 0,
+			cache_creation_ttl_known integer not null default 0,
 			total_tokens integer not null default 0,
 			zero_token_calls integer not null default 0,
 			latency_sum_ms integer not null default 0,
@@ -455,6 +497,12 @@ func Migrate(db *sql.DB) error {
 			long_cached_tokens integer not null default 0,
 			long_cache_read_tokens integer not null default 0,
 			long_cache_creation_tokens integer not null default 0,
+			image_input_tokens integer not null default 0,
+			image_cache_read_tokens integer not null default 0,
+			image_output_tokens integer not null default 0,
+			cache_creation_1h_tokens integer not null default 0,
+			image_tokens_known integer not null default 0,
+			cache_creation_ttl_known integer not null default 0,
 			total_tokens integer not null default 0,
 			zero_token_calls integer not null default 0,
 			latency_sum_ms integer not null default 0,
@@ -520,6 +568,12 @@ func Migrate(db *sql.DB) error {
 			cache_read_tokens integer not null,
 			cache_creation_tokens integer not null,
 			normalized_total_input_tokens integer not null,
+			image_input_tokens integer not null default 0,
+			image_cache_read_tokens integer not null default 0,
+			image_output_tokens integer not null default 0,
+			cache_creation_1h_tokens integer not null default 0,
+			image_tokens_known integer not null default 0,
+			cache_creation_ttl_known integer not null default 0,
 			total_tokens integer not null,
 			header_quota_plan_type text not null,
 			header_error_kind text not null,
@@ -733,6 +787,14 @@ func Migrate(db *sql.DB) error {
 			completion_configured integer not null default 0,
 			cache_read_configured integer not null default 0,
 			cache_creation_configured integer not null default 0,
+			image_prompt_per_1m real not null default 0,
+			image_completion_per_1m real not null default 0,
+			image_cache_read_per_1m real not null default 0,
+			cache_creation_1h_per_1m real not null default 0,
+			image_prompt_configured integer not null default 0,
+			image_completion_configured integer not null default 0,
+			image_cache_read_configured integer not null default 0,
+			cache_creation_1h_configured integer not null default 0,
 			source text,
 			source_model_id text,
 			raw_json text,
@@ -752,6 +814,14 @@ func Migrate(db *sql.DB) error {
 			cache_configured integer not null default 0,
 			cache_read_configured integer not null default 0,
 			cache_creation_configured integer not null default 0,
+			image_prompt_per_1m real not null default 0,
+			image_completion_per_1m real not null default 0,
+			image_cache_read_per_1m real not null default 0,
+			cache_creation_1h_per_1m real not null default 0,
+			image_prompt_configured integer not null default 0,
+			image_completion_configured integer not null default 0,
+			image_cache_read_configured integer not null default 0,
+			cache_creation_1h_configured integer not null default 0,
 			primary key (model, threshold_tokens),
 			foreign key (model) references model_prices(model) on delete cascade
 		)`,
@@ -769,6 +839,15 @@ func Migrate(db *sql.DB) error {
 			cache_configured integer not null default 0,
 			cache_read_configured integer not null default 0,
 			cache_creation_configured integer not null default 0,
+			image_prompt_per_1m real not null default 0,
+			image_completion_per_1m real not null default 0,
+			image_cache_read_per_1m real not null default 0,
+			cache_creation_1h_per_1m real not null default 0,
+			image_prompt_configured integer not null default 0,
+			image_completion_configured integer not null default 0,
+			image_cache_read_configured integer not null default 0,
+			cache_creation_1h_configured integer not null default 0,
+			context_tiers_json text,
 			primary key (model, mode, service_tier),
 			foreign key (model) references model_prices(model) on delete cascade
 		)`,
@@ -1086,6 +1165,9 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 	if err := ensureDashboardHourlyRollupFormatVersion(db); err != nil {
+		return err
+	}
+	if err := ensureUsageBillingTokenDetailsColumns(db); err != nil {
 		return err
 	}
 	return ensureModelPriceColumns(db)
@@ -3174,6 +3256,14 @@ func ensureModelPriceColumns(db *sql.DB) error {
 		{name: "completion_configured", definition: "integer not null default 0"},
 		{name: "cache_read_configured", definition: "integer not null default 0"},
 		{name: "cache_creation_configured", definition: "integer not null default 0"},
+		{name: "image_prompt_per_1m", definition: "real not null default 0"},
+		{name: "image_completion_per_1m", definition: "real not null default 0"},
+		{name: "image_cache_read_per_1m", definition: "real not null default 0"},
+		{name: "cache_creation_1h_per_1m", definition: "real not null default 0"},
+		{name: "image_prompt_configured", definition: "integer not null default 0"},
+		{name: "image_completion_configured", definition: "integer not null default 0"},
+		{name: "image_cache_read_configured", definition: "integer not null default 0"},
+		{name: "cache_creation_1h_configured", definition: "integer not null default 0"},
 	}
 	added := map[string]bool{}
 	for _, column := range columns {
@@ -3204,5 +3294,129 @@ func ensureModelPriceColumns(db *sql.DB) error {
 			return err
 		}
 	}
+
+	tableColumns := map[string][]struct {
+		name       string
+		definition string
+	}{
+		"model_price_context_tiers": {
+			{name: "image_prompt_per_1m", definition: "real not null default 0"},
+			{name: "image_completion_per_1m", definition: "real not null default 0"},
+			{name: "image_cache_read_per_1m", definition: "real not null default 0"},
+			{name: "cache_creation_1h_per_1m", definition: "real not null default 0"},
+			{name: "image_prompt_configured", definition: "integer not null default 0"},
+			{name: "image_completion_configured", definition: "integer not null default 0"},
+			{name: "image_cache_read_configured", definition: "integer not null default 0"},
+			{name: "cache_creation_1h_configured", definition: "integer not null default 0"},
+		},
+		"model_price_service_tiers": {
+			{name: "image_prompt_per_1m", definition: "real not null default 0"},
+			{name: "image_completion_per_1m", definition: "real not null default 0"},
+			{name: "image_cache_read_per_1m", definition: "real not null default 0"},
+			{name: "cache_creation_1h_per_1m", definition: "real not null default 0"},
+			{name: "image_prompt_configured", definition: "integer not null default 0"},
+			{name: "image_completion_configured", definition: "integer not null default 0"},
+			{name: "image_cache_read_configured", definition: "integer not null default 0"},
+			{name: "cache_creation_1h_configured", definition: "integer not null default 0"},
+			{name: "context_tiers_json", definition: "text"},
+		},
+	}
+	for tbl, cols := range tableColumns {
+		tRows, err := tx.Query(fmt.Sprintf(`pragma table_info(%s)`, tbl))
+		if err != nil {
+			continue
+		}
+		tExisting := map[string]struct{}{}
+		for tRows.Next() {
+			var cid int
+			var cName string
+			var cType string
+			var cNotNull int
+			var cDefault any
+			var cPk int
+			if err := tRows.Scan(&cid, &cName, &cType, &cNotNull, &cDefault, &cPk); err == nil {
+				tExisting[cName] = struct{}{}
+			}
+		}
+		_ = tRows.Close()
+		for _, col := range cols {
+			if _, ok := tExisting[col.name]; ok {
+				continue
+			}
+			_, _ = tx.Exec(fmt.Sprintf(`alter table %s add column %s %s`, tbl, col.name, col.definition))
+		}
+	}
+
+	return tx.Commit()
+}
+
+func ensureUsageBillingTokenDetailsColumns(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	columns := []struct {
+		name       string
+		definition string
+	}{
+		{name: "image_input_tokens", definition: "integer not null default 0"},
+		{name: "image_cache_read_tokens", definition: "integer not null default 0"},
+		{name: "image_output_tokens", definition: "integer not null default 0"},
+		{name: "cache_creation_1h_tokens", definition: "integer not null default 0"},
+		{name: "image_tokens_known", definition: "integer not null default 0"},
+		{name: "cache_creation_ttl_known", definition: "integer not null default 0"},
+	}
+
+	tables := []string{
+		"usage_events",
+		"usage_hourly_aggregate_v1",
+		"usage_pricing_hourly_rollups_v1",
+		"usage_pricing_account_rollups_v1",
+		"usage_dashboard_hourly_rollups",
+		"usage_account_model_rollups",
+		"usage_monitoring_account_daily_rollups_v1",
+		"usage_monitoring_api_key_daily_rollups_v1",
+		"usage_monitoring_selector_daily_rollups_v1",
+		"usage_monitoring_event_projection_v1",
+	}
+
+	for _, table := range tables {
+		rows, err := tx.Query(`pragma table_info(` + table + `)`)
+		if err != nil {
+			return err
+		}
+		existing := map[string]struct{}{}
+		for rows.Next() {
+			var cid int
+			var name, typ string
+			var notNull int
+			var defaultValue any
+			var pk int
+			if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			existing[name] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
+		if len(existing) == 0 {
+			continue
+		}
+		for _, column := range columns {
+			if _, ok := existing[column.name]; ok {
+				continue
+			}
+			if _, err := tx.Exec(fmt.Sprintf(`alter table %s add column %s %s`, table, column.name, column.definition)); err != nil {
+				return err
+			}
+		}
+	}
+
 	return tx.Commit()
 }

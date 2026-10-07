@@ -15,11 +15,19 @@ export interface ModelPriceContextTier {
   cache: number;
   cacheRead?: number;
   cacheCreation?: number;
+  imagePrompt?: number;
+  imageCompletion?: number;
+  imageCacheRead?: number;
+  cacheCreation1h?: number;
   promptConfigured?: boolean;
   completionConfigured?: boolean;
   cacheConfigured?: boolean;
   cacheReadConfigured?: boolean;
   cacheCreationConfigured?: boolean;
+  imagePromptConfigured?: boolean;
+  imageCompletionConfigured?: boolean;
+  imageCacheReadConfigured?: boolean;
+  cacheCreation1hConfigured?: boolean;
 }
 
 export interface ModelPriceServiceTier {
@@ -30,11 +38,20 @@ export interface ModelPriceServiceTier {
   cache: number;
   cacheRead?: number;
   cacheCreation?: number;
+  imagePrompt?: number;
+  imageCompletion?: number;
+  imageCacheRead?: number;
+  cacheCreation1h?: number;
   promptConfigured?: boolean;
   completionConfigured?: boolean;
   cacheConfigured?: boolean;
   cacheReadConfigured?: boolean;
   cacheCreationConfigured?: boolean;
+  imagePromptConfigured?: boolean;
+  imageCompletionConfigured?: boolean;
+  imageCacheReadConfigured?: boolean;
+  cacheCreation1hConfigured?: boolean;
+  contextTiers?: ModelPriceContextTier[];
 }
 
 /** Recurring UTC window (weekdays 0=Sun..6=Sat, StartHour <= hour < EndHour) billed at the "peak" service tier. */
@@ -50,10 +67,18 @@ export interface ModelPrice {
   cache: number;
   cacheRead?: number;
   cacheCreation?: number;
+  imagePrompt?: number;
+  imageCompletion?: number;
+  imageCacheRead?: number;
+  cacheCreation1h?: number;
   promptConfigured?: boolean;
   completionConfigured?: boolean;
   cacheReadConfigured?: boolean;
   cacheCreationConfigured?: boolean;
+  imagePromptConfigured?: boolean;
+  imageCompletionConfigured?: boolean;
+  imageCacheReadConfigured?: boolean;
+  cacheCreation1hConfigured?: boolean;
   source?: string;
   sourceModelId?: string;
   rawJson?: string;
@@ -81,6 +106,18 @@ export interface UsageTokens {
   cache_write_input_tokens?: number;
   cacheWriteInputTokens?: number;
   total_tokens?: number;
+  image_input_tokens?: number;
+  imageInputTokens?: number;
+  image_cache_read_tokens?: number;
+  imageCacheReadTokens?: number;
+  image_output_tokens?: number;
+  imageOutputTokens?: number;
+  cache_creation_1h_tokens?: number;
+  cacheCreation1hTokens?: number;
+  image_tokens_known?: boolean;
+  imageTokensKnown?: boolean;
+  cache_creation_ttl_known?: boolean;
+  cacheCreationTtlKnown?: boolean;
   cache_input_mode?: CacheInputMode | string;
   cacheInputMode?: CacheInputMode | string;
 }
@@ -394,49 +431,6 @@ const isConfiguredPriceValue = (value: unknown, configured?: boolean): boolean =
   return configured === true || (Number.isFinite(parsed) && parsed > 0);
 };
 
-const getOfficialGpt56Price = (modelName: string): ModelPrice | undefined => {
-  if (isModelFamily(modelName, 'gpt-5.6-sol')) {
-    return {
-      prompt: 5,
-      completion: 30,
-      cache: 0.5,
-      cacheRead: 0.5,
-      cacheCreation: 6.25,
-      promptConfigured: true,
-      completionConfigured: true,
-      cacheReadConfigured: true,
-      cacheCreationConfigured: true,
-    };
-  }
-  if (isModelFamily(modelName, 'gpt-5.6-terra')) {
-    return {
-      prompt: 2.5,
-      completion: 15,
-      cache: 0.25,
-      cacheRead: 0.25,
-      cacheCreation: 3.125,
-      promptConfigured: true,
-      completionConfigured: true,
-      cacheReadConfigured: true,
-      cacheCreationConfigured: true,
-    };
-  }
-  if (isModelFamily(modelName, 'gpt-5.6-luna')) {
-    return {
-      prompt: 1,
-      completion: 6,
-      cache: 0.1,
-      cacheRead: 0.1,
-      cacheCreation: 1.25,
-      promptConfigured: true,
-      completionConfigured: true,
-      cacheReadConfigured: true,
-      cacheCreationConfigured: true,
-    };
-  }
-  return undefined;
-};
-
 export function getServiceTierMultiplier(modelName: string, serviceTier?: string): number {
   const tier = String(serviceTier ?? '')
     .trim()
@@ -582,7 +576,8 @@ export const inferCacheInputMode = (
   const normalizedMode = normalizeCacheIdentity(context.explicitMode);
   if (normalizedMode === 'separate_from_input') return 'separate_from_input';
   if (normalizedMode === 'included_in_input') return 'included_in_input';
-  if (normalizedMode === 'read_included_creation_separate') return 'read_included_creation_separate';
+  if (normalizedMode === 'read_included_creation_separate')
+    return 'read_included_creation_separate';
   const executorMode = classifyExecutorCacheInputMode(context.executorType);
   if (executorMode) return executorMode;
   for (const provider of [context.provider, context.providerSnapshot]) {
@@ -1158,8 +1153,14 @@ export function collectUsageDetailsWithEndpoint(usageData: unknown): UsageDetail
           fail_body: readDetailString(detailRaw.fail_body ?? detailRaw.failBody ?? failRaw.body),
           response_model: readDetailString(detailRaw.response_model ?? detailRaw.responseModel),
           session_id: readDetailString(detailRaw.session_id ?? detailRaw.sessionId),
-          parent_session_id: readDetailString(detailRaw.parent_session_id ?? detailRaw.parentSessionId),
-          access_token_sha256: readDetailString(detailRaw.access_token_sha256 ?? detailRaw.accessTokenSHA256 ?? detailRaw.accessTokenSha256),
+          parent_session_id: readDetailString(
+            detailRaw.parent_session_id ?? detailRaw.parentSessionId
+          ),
+          access_token_sha256: readDetailString(
+            detailRaw.access_token_sha256 ??
+              detailRaw.accessTokenSHA256 ??
+              detailRaw.accessTokenSha256
+          ),
           generate: typeof detailRaw.generate === 'boolean' ? detailRaw.generate : undefined,
           stream: typeof detailRaw.stream === 'boolean' ? detailRaw.stream : undefined,
           __modelName: analyticsModel,
@@ -1207,6 +1208,11 @@ export function extractTotalTokens(detail: unknown): number {
   );
 }
 
+export interface CostCalculationResult {
+  cost: number;
+  complete: boolean;
+}
+
 export function calculateCost(
   detail: Pick<
     UsageDetail,
@@ -1230,34 +1236,41 @@ export function calculateCost(
   >,
   modelPrices: Record<string, ModelPrice>
 ): number {
+  return calculateCostWithStatus(detail, modelPrices).cost;
+}
+
+export function calculateCostWithStatus(
+  detail: Pick<
+    UsageDetail,
+    | 'tokens'
+    | '__modelName'
+    | '__requestedModel'
+    | '__resolvedModel'
+    | 'service_tier'
+    | 'serviceTier'
+    | 'request_service_tier'
+    | 'requestServiceTier'
+    | 'response_service_tier'
+    | 'responseServiceTier'
+    | 'executor_type'
+    | 'executorType'
+    | 'provider'
+    | 'auth_provider_snapshot'
+    | 'authProviderSnapshot'
+    | 'auth_type'
+    | 'authType'
+  >,
+  modelPrices: Record<string, ModelPrice>
+): CostCalculationResult {
   const resolvedModel = detail.__resolvedModel || '';
   const analyticsModel = detail.__modelName || '';
   const requestedModel = detail.__requestedModel || analyticsModel;
-  const resolvedPrice = resolvedModel ? modelPrices[resolvedModel] : undefined;
-  const analyticsPrice = analyticsModel ? modelPrices[analyticsModel] : undefined;
-  const requestedPrice = requestedModel ? modelPrices[requestedModel] : undefined;
   const behaviorModel = resolvedModel || analyticsModel || requestedModel;
-  const behaviorFallback = getOfficialGpt56Price(behaviorModel);
-  const officialCandidatePrice =
-    getOfficialGpt56Price(resolvedModel) ||
-    getOfficialGpt56Price(analyticsModel) ||
-    getOfficialGpt56Price(requestedModel);
-  const configuredPrice = resolvedPrice || analyticsPrice || requestedPrice;
-  const basePrice = configuredPrice
-    ? {
-        ...configuredPrice,
-        prompt: isConfiguredPriceValue(configuredPrice.prompt, configuredPrice.promptConfigured)
-          ? Number(configuredPrice.prompt)
-          : (behaviorFallback?.prompt ?? 0),
-        completion: isConfiguredPriceValue(
-          configuredPrice.completion,
-          configuredPrice.completionConfigured
-        )
-          ? Number(configuredPrice.completion)
-          : (behaviorFallback?.completion ?? 0),
-      }
-    : officialCandidatePrice;
-  if (!basePrice) return 0;
+  const basePrice =
+    resolveConfiguredModelPrice(resolvedModel, modelPrices) ||
+    resolveConfiguredModelPrice(analyticsModel, modelPrices) ||
+    resolveConfiguredModelPrice(requestedModel, modelPrices);
+  if (!basePrice) return { cost: 0, complete: false };
 
   const identity = [
     detail.executor_type,
@@ -1271,83 +1284,308 @@ export function calculateCost(
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
-  const serviceTier = identity.includes('codex')
-    ? detail.request_service_tier ||
-      detail.requestServiceTier ||
-      detail.service_tier ||
-      detail.serviceTier ||
-      detail.response_service_tier ||
-      detail.responseServiceTier
-    : detail.response_service_tier ||
-      detail.responseServiceTier ||
-      detail.service_tier ||
-      detail.serviceTier ||
-      detail.request_service_tier ||
-      detail.requestServiceTier;
+  const canonicalTier = detail.service_tier || detail.serviceTier;
+  const requestTier = detail.request_service_tier || detail.requestServiceTier;
+  const responseTier = detail.response_service_tier || detail.responseServiceTier;
 
-  const inputTokens = Math.max(toFiniteNumber(detail.tokens.input_tokens), 0);
-  const completionTokens = Math.max(toFiniteNumber(detail.tokens.output_tokens), 0);
+  let serviceTier = canonicalTier;
+  if (
+    String(canonicalTier ?? '')
+      .trim()
+      .toLowerCase() === 'peak'
+  ) {
+    serviceTier = 'peak';
+  } else if (identity.includes('codex')) {
+    serviceTier = requestTier || canonicalTier || responseTier;
+  } else {
+    serviceTier = responseTier || canonicalTier || requestTier;
+  }
+
+  const inputTokens = Math.max(toFiniteNumber(detail.tokens?.input_tokens), 0);
+  const completionTokens = Math.max(toFiniteNumber(detail.tokens?.output_tokens), 0);
   const cachedTokens = Math.max(
-    Math.max(toFiniteNumber(detail.tokens.cached_tokens), 0),
-    Math.max(toFiniteNumber(detail.tokens.cache_tokens), 0)
+    Math.max(toFiniteNumber(detail.tokens?.cached_tokens), 0),
+    Math.max(toFiniteNumber(detail.tokens?.cache_tokens), 0)
   );
-  const cacheReadTokens = Math.max(toFiniteNumber(detail.tokens.cache_read_tokens), 0);
-  const cacheCreationTokens = Math.max(toFiniteNumber(detail.tokens.cache_creation_tokens), 0);
-  const hasContextPricing = Boolean(basePrice.contextTiers?.length);
-  const contextTier = selectContextTierPrice(basePrice, inputTokens);
-  const longContext =
-    !hasContextPricing && supportsLongContextPremium(behaviorModel) && inputTokens > 272_000;
+  const cacheReadTokens = Math.max(toFiniteNumber(detail.tokens?.cache_read_tokens), 0);
+  const cacheCreationTokens = Math.max(toFiniteNumber(detail.tokens?.cache_creation_tokens), 0);
+  const imageTokensKnown = Boolean(
+    detail.tokens?.image_tokens_known ?? detail.tokens?.imageTokensKnown
+  );
+  const cacheCreationTTLKnown = Boolean(
+    detail.tokens?.cache_creation_ttl_known ?? detail.tokens?.cacheCreationTtlKnown
+  );
+
+  // Sub-buckets
+  const imageCacheReadRaw = toFiniteNumber(
+    detail.tokens?.image_cache_read_tokens ?? detail.tokens?.imageCacheReadTokens
+  );
+  const imageCacheReadTokens = Math.min(Math.max(imageCacheReadRaw, 0), cacheReadTokens);
+  const textCacheReadTokens = cacheReadTokens - imageCacheReadTokens;
+
+  const imageOutputRaw = toFiniteNumber(
+    detail.tokens?.image_output_tokens ?? detail.tokens?.imageOutputTokens
+  );
+  const imageOutputTokens = Math.min(Math.max(imageOutputRaw, 0), completionTokens);
+  const textOutputTokens = completionTokens - imageOutputTokens;
+
+  const creation1hRaw = toFiniteNumber(
+    detail.tokens?.cache_creation_1h_tokens ?? detail.tokens?.cacheCreation1hTokens
+  );
+  const creation1hTokens = Math.min(Math.max(creation1hRaw, 0), cacheCreationTokens);
+  const creation5mTokens = cacheCreationTokens - creation1hTokens;
+
+  const readTokens = cachedTokens + cacheReadTokens;
+  const promptTokens = Math.max(inputTokens - readTokens - cacheCreationTokens, 0);
+
+  // ImageInputTokens is total image input (including cached image read).
+  // Uncached image prompt tokens = max(ImageInputTokens - ImageCacheReadTokens, 0).
+  const imagePromptRaw = toFiniteNumber(
+    detail.tokens?.image_input_tokens ?? detail.tokens?.imageInputTokens
+  );
+  const rawImagePromptTokens = Math.max(imagePromptRaw - imageCacheReadTokens, 0);
+  const imagePromptTokens = Math.min(rawImagePromptTokens, promptTokens);
+  const textPromptTokens = promptTokens - imagePromptTokens;
+
   const normalizedServiceTier = String(serviceTier ?? '')
     .trim()
     .toLowerCase();
-  const longContextOverridesServiceTier =
-    longContext && (normalizedServiceTier === 'priority' || normalizedServiceTier === 'fast');
-  const serviceTierPrice =
-    !contextTier && !longContextOverridesServiceTier
-      ? selectServiceTierPrice(basePrice, serviceTier)
-      : undefined;
-  const price = contextTier
-    ? applyContextTierPrice(basePrice, contextTier)
-    : serviceTierPrice
-      ? applyServiceTierPrice(basePrice, serviceTierPrice)
-      : basePrice;
-  const promptPrice = Number(price.prompt) || 0;
-  const completionPrice = Number(price.completion) || 0;
-  const configuredCacheReadPrice = Number(price.cacheRead) || 0;
-  const cacheReadPrice = isConfiguredPriceValue(configuredCacheReadPrice, price.cacheReadConfigured)
+  const isStandardTier =
+    !normalizedServiceTier ||
+    normalizedServiceTier === 'default' ||
+    normalizedServiceTier === 'standard' ||
+    normalizedServiceTier === 'auto';
+  const serviceTierRule = selectServiceTierPrice(basePrice, serviceTier);
+
+  const contextTier = selectContextTierPrice(basePrice, inputTokens);
+  const isLegacyLongContext =
+    !basePrice.contextTiers?.length &&
+    supportsLongContextPremium(behaviorModel) &&
+    inputTokens > 272_000;
+
+  let effectivePrice = basePrice;
+  let tierComplete = true;
+  let inputMultiplier = 1;
+  let outputMultiplier = 1;
+
+  if (isLegacyLongContext) {
+    if (normalizedServiceTier === 'priority' || normalizedServiceTier === 'fast') {
+      inputMultiplier = 2;
+      outputMultiplier = 1.5;
+    } else if (normalizedServiceTier === 'flex' || normalizedServiceTier === 'batch') {
+      if (serviceTierRule) {
+        effectivePrice = applyServiceTierPrice(basePrice, serviceTierRule);
+        inputMultiplier = 2;
+        outputMultiplier = 1.5;
+      } else {
+        inputMultiplier = 2 * 0.5;
+        outputMultiplier = 1.5 * 0.5;
+      }
+    } else {
+      inputMultiplier = 2;
+      outputMultiplier = 1.5;
+    }
+  } else if (serviceTierRule) {
+    effectivePrice = applyServiceTierPrice(basePrice, serviceTierRule);
+    const contextTier = selectContextTierPrice(basePrice, inputTokens);
+    if (contextTier) {
+      if (serviceTierRule.contextTiers?.length) {
+        const stContextTier = selectContextTierPrice(serviceTierRule, inputTokens);
+        if (stContextTier) {
+          effectivePrice = applyContextTierPrice(effectivePrice, stContextTier);
+        } else {
+          // Context tier threshold not quoted in service tier (e.g. GPT-5.5 long Fast)
+          tierComplete = false;
+        }
+      } else {
+        // Service tier has no context tiers while base price does
+        tierComplete = false;
+      }
+    }
+  } else if (isStandardTier) {
+    const contextTier = selectContextTierPrice(basePrice, inputTokens);
+    if (contextTier) {
+      effectivePrice = applyContextTierPrice(basePrice, contextTier);
+    }
+  } else {
+    // Service tier not in basePrice.serviceTiers
+    const isGemini = isModelFamily(behaviorModel, 'gemini');
+    if (isGemini) {
+      tierComplete = false;
+    } else if (basePrice.contextTiers?.length) {
+      const contextTier = selectContextTierPrice(basePrice, inputTokens);
+      if (contextTier) {
+        if (normalizedServiceTier === 'flex' || normalizedServiceTier === 'batch') {
+          effectivePrice = applyContextTierPrice(basePrice, contextTier);
+          inputMultiplier = 0.5;
+          outputMultiplier = 0.5;
+          tierComplete = false;
+        } else {
+          tierComplete = false;
+        }
+      } else {
+        const mult = getServiceTierMultiplier(behaviorModel, serviceTier);
+        inputMultiplier = mult;
+        outputMultiplier = mult;
+        tierComplete = false;
+      }
+    } else {
+      const mult = getServiceTierMultiplier(behaviorModel, serviceTier);
+      inputMultiplier = mult;
+      outputMultiplier = mult;
+      tierComplete = false;
+    }
+  }
+
+  if (!tierComplete && !isStandardTier && contextTier && !serviceTierRule?.contextTiers?.length) {
+    // Unquoted service tier + long context combination (e.g. GPT-5.5 long Fast)
+    return { cost: 0, complete: false };
+  }
+
+  const promptPrice = Number(effectivePrice.prompt) || 0;
+  const imagePromptPrice = isConfiguredPriceValue(
+    effectivePrice.imagePrompt,
+    effectivePrice.imagePromptConfigured
+  )
+    ? Number(effectivePrice.imagePrompt)
+    : promptPrice;
+
+  const completionPrice = Number(effectivePrice.completion) || 0;
+  const imageCompletionPrice = isConfiguredPriceValue(
+    effectivePrice.imageCompletion,
+    effectivePrice.imageCompletionConfigured
+  )
+    ? Number(effectivePrice.imageCompletion)
+    : completionPrice;
+
+  const configuredCacheReadPrice = Number(effectivePrice.cacheRead) || 0;
+  const cacheReadPrice = isConfiguredPriceValue(
+    configuredCacheReadPrice,
+    effectivePrice.cacheReadConfigured
+  )
     ? configuredCacheReadPrice
-    : isGpt56Model(behaviorModel)
-      ? promptPrice * 0.1
-      : Number(price.cache) || 0;
-  const configuredCacheCreationPrice = Number(price.cacheCreation) || 0;
+    : Number(effectivePrice.cache) || 0;
+  const imageCacheReadPrice = isConfiguredPriceValue(
+    effectivePrice.imageCacheRead,
+    effectivePrice.imageCacheReadConfigured
+  )
+    ? Number(effectivePrice.imageCacheRead)
+    : cacheReadPrice;
+
+  const configuredCacheCreationPrice = Number(effectivePrice.cacheCreation) || 0;
   const cacheCreationPrice = isConfiguredPriceValue(
     configuredCacheCreationPrice,
-    price.cacheCreationConfigured
+    effectivePrice.cacheCreationConfigured
   )
     ? configuredCacheCreationPrice
-    : promptPrice * (isGpt56Model(behaviorModel) ? 1.25 : 1);
-  const readTokens = cachedTokens + cacheReadTokens;
-  const promptTokens = Math.max(inputTokens - readTokens - cacheCreationTokens, 0);
-  const inputMultiplier = longContext ? 2 : 1;
-  const outputMultiplier = longContext ? 1.5 : 1;
-  const standardCost =
-    ((promptTokens / TOKENS_PER_PRICE_UNIT) * promptPrice +
-      (cachedTokens / TOKENS_PER_PRICE_UNIT) * (Number(price.cache) || 0) +
-      (cacheReadTokens / TOKENS_PER_PRICE_UNIT) * cacheReadPrice +
-      (cacheCreationTokens / TOKENS_PER_PRICE_UNIT) * cacheCreationPrice) *
-      inputMultiplier +
-    (completionTokens / TOKENS_PER_PRICE_UNIT) * completionPrice * outputMultiplier;
+    : promptPrice;
+  const cacheCreation1hPrice = isConfiguredPriceValue(
+    effectivePrice.cacheCreation1h,
+    effectivePrice.cacheCreation1hConfigured
+  )
+    ? Number(effectivePrice.cacheCreation1h)
+    : cacheCreationPrice;
 
-  const multiplier =
-    longContextOverridesServiceTier || contextTier || serviceTierPrice
-      ? 1
-      : getServiceTierMultiplier(behaviorModel, serviceTier);
-  const total = standardCost * multiplier;
-  return Number.isFinite(total) && total > 0 ? total : 0;
+  const standardCost =
+    ((textPromptTokens / TOKENS_PER_PRICE_UNIT) * promptPrice +
+      (imagePromptTokens / TOKENS_PER_PRICE_UNIT) * imagePromptPrice +
+      (cachedTokens / TOKENS_PER_PRICE_UNIT) * (Number(effectivePrice.cache) || 0) +
+      (textCacheReadTokens / TOKENS_PER_PRICE_UNIT) * cacheReadPrice +
+      (imageCacheReadTokens / TOKENS_PER_PRICE_UNIT) * imageCacheReadPrice +
+      (creation5mTokens / TOKENS_PER_PRICE_UNIT) * cacheCreationPrice +
+      (creation1hTokens / TOKENS_PER_PRICE_UNIT) * cacheCreation1hPrice) *
+      inputMultiplier +
+    ((textOutputTokens / TOKENS_PER_PRICE_UNIT) * completionPrice +
+      (imageOutputTokens / TOKENS_PER_PRICE_UNIT) * imageCompletionPrice) *
+      outputMultiplier;
+
+  let complete = tierComplete;
+  const hasDistinctImage =
+    (Boolean(effectivePrice.imagePromptConfigured) && imagePromptPrice !== promptPrice) ||
+    (Boolean(effectivePrice.imageCompletionConfigured) &&
+      imageCompletionPrice !== completionPrice) ||
+    (Boolean(effectivePrice.imageCacheReadConfigured) && imageCacheReadPrice !== cacheReadPrice);
+  if (
+    hasDistinctImage &&
+    !imageTokensKnown &&
+    (promptTokens > 0 || completionTokens > 0 || cacheReadTokens > 0)
+  ) {
+    complete = false;
+  }
+
+  const hasDistinct1h =
+    Boolean(effectivePrice.cacheCreation1hConfigured) &&
+    cacheCreation1hPrice !== cacheCreationPrice;
+  if (hasDistinct1h && !cacheCreationTTLKnown && cacheCreationTokens > 0) {
+    complete = false;
+  }
+
+  return {
+    cost: Number.isFinite(standardCost) && standardCost > 0 ? standardCost : 0,
+    complete,
+  };
+}
+
+export function resolveConfiguredModelPrice(
+  modelName: string | undefined,
+  prices: Record<string, ModelPrice>
+): ModelPrice | undefined {
+  if (!modelName) return undefined;
+  const name = modelName.trim();
+  if (!name) return undefined;
+  if (prices[name]) return prices[name];
+
+  const slug = name.includes('/') ? name.slice(name.lastIndexOf('/') + 1).trim() : name;
+  if (slug && prices[slug]) return prices[slug];
+
+  for (const price of Object.values(prices)) {
+    if (price.sourceModelId) {
+      const src = price.sourceModelId.trim();
+      if (src === name || src === slug) return price;
+      const srcSlug = src.includes('/') ? src.slice(src.lastIndexOf('/') + 1).trim() : src;
+      if (srcSlug === name || srcSlug === slug) return price;
+    }
+  }
+
+  if ((name === 'gpt-5.6' || slug === 'gpt-5.6') && prices['gpt-5.6-sol']) {
+    return prices['gpt-5.6-sol'];
+  }
+
+  return undefined;
+}
+
+export function isModelPriceMultimodalOrTtl(price: ModelPrice | undefined): boolean {
+  if (!price) return false;
+  const promptPrice = Number(price.prompt) || 0;
+  const completionPrice = Number(price.completion) || 0;
+  const cacheReadPrice = Number(price.cacheRead) || Number(price.cache) || 0;
+  const cacheCreationPrice = Number(price.cacheCreation) || promptPrice;
+
+  const hasDistinctImage =
+    (Boolean(price.imagePromptConfigured) && Number(price.imagePrompt) !== promptPrice) ||
+    (Boolean(price.imageCompletionConfigured) &&
+      Number(price.imageCompletion) !== completionPrice) ||
+    (Boolean(price.imageCacheReadConfigured) && Number(price.imageCacheRead) !== cacheReadPrice);
+
+  const hasDistinct1h =
+    Boolean(price.cacheCreation1hConfigured) &&
+    Number(price.cacheCreation1h) !== cacheCreationPrice;
+
+  return hasDistinctImage || hasDistinct1h;
+}
+
+export function isCostComplete(
+  item: { cost_complete?: boolean; incomplete_cost_calls?: number } | undefined
+): boolean {
+  if (!item) return true;
+  if (item.cost_complete === false) return false;
+  if (typeof item.incomplete_cost_calls === 'number' && item.incomplete_cost_calls > 0)
+    return false;
+  return true;
 }
 
 function selectContextTierPrice(
-  price: ModelPrice,
+  price: ModelPrice | ModelPriceServiceTier,
   inputTokens: number
 ): ModelPriceContextTier | undefined {
   return (price.contextTiers ?? []).reduce<ModelPriceContextTier | undefined>(
@@ -1368,10 +1606,22 @@ function applyContextTierPrice(price: ModelPrice, tier: ModelPriceContextTier): 
     cache: tier.cacheConfigured ? tier.cache : price.cache,
     cacheRead: tier.cacheReadConfigured ? tier.cacheRead : price.cacheRead,
     cacheCreation: tier.cacheCreationConfigured ? tier.cacheCreation : price.cacheCreation,
+    imagePrompt: tier.imagePromptConfigured ? tier.imagePrompt : price.imagePrompt,
+    imageCompletion: tier.imageCompletionConfigured ? tier.imageCompletion : price.imageCompletion,
+    imageCacheRead: tier.imageCacheReadConfigured ? tier.imageCacheRead : price.imageCacheRead,
+    cacheCreation1h: tier.cacheCreation1hConfigured ? tier.cacheCreation1h : price.cacheCreation1h,
     promptConfigured: tier.promptConfigured ? true : price.promptConfigured,
     completionConfigured: tier.completionConfigured ? true : price.completionConfigured,
     cacheReadConfigured: tier.cacheReadConfigured ? true : price.cacheReadConfigured,
     cacheCreationConfigured: tier.cacheCreationConfigured ? true : price.cacheCreationConfigured,
+    imagePromptConfigured: tier.imagePromptConfigured ? true : price.imagePromptConfigured,
+    imageCompletionConfigured: tier.imageCompletionConfigured
+      ? true
+      : price.imageCompletionConfigured,
+    imageCacheReadConfigured: tier.imageCacheReadConfigured ? true : price.imageCacheReadConfigured,
+    cacheCreation1hConfigured: tier.cacheCreation1hConfigured
+      ? true
+      : price.cacheCreation1hConfigured,
   };
 }
 
@@ -1396,10 +1646,23 @@ function applyServiceTierPrice(price: ModelPrice, tier: ModelPriceServiceTier): 
     cache: tier.cacheConfigured ? tier.cache : price.cache,
     cacheRead: tier.cacheReadConfigured ? tier.cacheRead : price.cacheRead,
     cacheCreation: tier.cacheCreationConfigured ? tier.cacheCreation : price.cacheCreation,
+    imagePrompt: tier.imagePromptConfigured ? tier.imagePrompt : price.imagePrompt,
+    imageCompletion: tier.imageCompletionConfigured ? tier.imageCompletion : price.imageCompletion,
+    imageCacheRead: tier.imageCacheReadConfigured ? tier.imageCacheRead : price.imageCacheRead,
+    cacheCreation1h: tier.cacheCreation1hConfigured ? tier.cacheCreation1h : price.cacheCreation1h,
     promptConfigured: tier.promptConfigured ? true : price.promptConfigured,
     completionConfigured: tier.completionConfigured ? true : price.completionConfigured,
     cacheReadConfigured: tier.cacheReadConfigured ? true : price.cacheReadConfigured,
     cacheCreationConfigured: tier.cacheCreationConfigured ? true : price.cacheCreationConfigured,
+    imagePromptConfigured: tier.imagePromptConfigured ? true : price.imagePromptConfigured,
+    imageCompletionConfigured: tier.imageCompletionConfigured
+      ? true
+      : price.imageCompletionConfigured,
+    imageCacheReadConfigured: tier.imageCacheReadConfigured ? true : price.imageCacheReadConfigured,
+    cacheCreation1hConfigured: tier.cacheCreation1hConfigured
+      ? true
+      : price.cacheCreation1hConfigured,
+    contextTiers: tier.contextTiers?.length ? tier.contextTiers : undefined,
   };
 }
 

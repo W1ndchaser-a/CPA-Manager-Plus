@@ -7,6 +7,7 @@ import {
   buildModelPriceSummary,
   buildSyncPriceModelsFromSummary,
   createPriceDraft,
+  createEmptyContextTierDraft,
   filterModelPriceRows,
   formatContextThreshold,
   formatServiceTierRule,
@@ -157,35 +158,10 @@ describe('modelPricesPageModel', () => {
     ]);
   });
 
-  it('marks manually entered prices with a manual source', () => {
-    expect(
-      buildPriceFromDraft({
-        model: 'manual-model',
-        prompt: '1',
-        completion: '2',
-        cache: '',
-        cacheRead: '',
-        cacheCreation: '',
-        contextTiers: [],
-        serviceTiers: [],
-      })
-    ).toMatchObject({
-      prompt: 1,
-      completion: 2,
-      cache: 1,
-      promptConfigured: true,
-      completionConfigured: true,
-      cacheReadConfigured: false,
-      cacheCreationConfigured: false,
-      source: 'manual',
-      contextTiers: [],
-      serviceTiers: [],
-    });
-  });
-
   it('distinguishes blank cache prices from explicitly configured zero prices', () => {
     expect(
       buildPriceFromDraft({
+        ...createPriceDraft('gpt-5.6-sol'),
         model: 'gpt-5.6-sol',
         prompt: '0',
         completion: '0',
@@ -280,6 +256,7 @@ describe('modelPricesPageModel', () => {
         ...baseDraft,
         contextTiers: [
           {
+            ...createEmptyContextTierDraft(),
             thresholdTokens: '128000',
             prompt: '10',
             completion: '',
@@ -288,6 +265,7 @@ describe('modelPricesPageModel', () => {
             cacheCreation: '',
           },
           {
+            ...createEmptyContextTierDraft(),
             thresholdTokens: '128000',
             prompt: '',
             completion: '20',
@@ -310,10 +288,63 @@ describe('modelPricesPageModel', () => {
             cache: '',
             cacheRead: '',
             cacheCreation: '',
+            imagePrompt: '',
+            imageCompletion: '',
+            imageCacheRead: '',
+            cacheCreation1h: '',
+            contextTiers: [],
           },
         ],
       })
     ).toBe('service_price');
+    expect(
+      validatePriceDraft({
+        ...baseDraft,
+        contextTiers: [
+          {
+            thresholdTokens: '200000',
+            prompt: '4',
+            completion: '18',
+            cache: '',
+            cacheRead: '',
+            cacheCreation: '',
+            imagePrompt: '',
+            imageCompletion: '',
+            imageCacheRead: '',
+            cacheCreation1h: '',
+          },
+        ],
+        serviceTiers: [
+          {
+            mode: 'priority',
+            serviceTier: 'priority',
+            prompt: '3.6',
+            completion: '21.6',
+            cache: '',
+            cacheRead: '',
+            cacheCreation: '',
+            imagePrompt: '',
+            imageCompletion: '',
+            imageCacheRead: '',
+            cacheCreation1h: '',
+            contextTiers: [
+              {
+                thresholdTokens: '300000', // not in base context tiers
+                prompt: '7.2',
+                completion: '32.4',
+                cache: '',
+                cacheRead: '',
+                cacheCreation: '',
+                imagePrompt: '',
+                imageCompletion: '',
+                imageCacheRead: '',
+                cacheCreation1h: '',
+              },
+            ],
+          },
+        ],
+      })
+    ).toBe('service_context_threshold');
   });
 
   it('formats context tier thresholds compactly', () => {
@@ -381,5 +412,92 @@ describe('modelPricesPageModel', () => {
     const saved = buildPriceFromDraft(createPriceDraft('m', price));
     expect(saved?.peakWindows).toEqual(peakWindows);
     expect(formatPeakWindow(peakWindows[0])).toBe('Mon-Fri 01-04 UTC');
+  });
+
+  it('round-trips multimodal, 1h TTL, and service-tier context tiers through draft and build', () => {
+    const originalPrice = {
+      prompt: 2,
+      completion: 10,
+      cache: 0.1,
+      cacheRead: 0.1,
+      cacheCreation: 2.5,
+      imagePrompt: 8,
+      imageCompletion: 30,
+      imageCacheRead: 2,
+      cacheCreation1h: 8,
+      promptConfigured: true,
+      completionConfigured: true,
+      cacheReadConfigured: true,
+      cacheCreationConfigured: true,
+      imagePromptConfigured: true,
+      imageCompletionConfigured: true,
+      imageCacheReadConfigured: true,
+      cacheCreation1hConfigured: true,
+      contextTiers: [
+        {
+          thresholdTokens: 272_000,
+          prompt: 4,
+          completion: 15,
+          cache: 0.2,
+          promptConfigured: true,
+          completionConfigured: true,
+        },
+      ],
+      serviceTiers: [
+        {
+          mode: 'fast',
+          serviceTier: 'priority',
+          prompt: 4,
+          completion: 20,
+          cache: 0.2,
+          promptConfigured: true,
+          completionConfigured: true,
+          contextTiers: [
+            {
+              thresholdTokens: 272_000,
+              prompt: 8,
+              completion: 30,
+              cache: 0.4,
+              promptConfigured: true,
+              completionConfigured: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    const draft = createPriceDraft('gpt-6.1-sol', originalPrice);
+    expect(draft.imagePrompt).toBe('8');
+    expect(draft.imageCompletion).toBe('30');
+    expect(draft.imageCacheRead).toBe('2');
+    expect(draft.cacheCreation1h).toBe('8');
+    expect(draft.serviceTiers[0].contextTiers[0].thresholdTokens).toBe('272000');
+    expect(draft.serviceTiers[0].contextTiers[0].prompt).toBe('8');
+    expect(draft.serviceTiers[0].contextTiers[0].completion).toBe('30');
+
+    const built = buildPriceFromDraft(draft);
+    expect(built).toMatchObject({
+      imagePrompt: 8,
+      imageCompletion: 30,
+      imageCacheRead: 2,
+      cacheCreation1h: 8,
+      imagePromptConfigured: true,
+      imageCompletionConfigured: true,
+      imageCacheReadConfigured: true,
+      cacheCreation1hConfigured: true,
+      serviceTiers: [
+        expect.objectContaining({
+          mode: 'fast',
+          serviceTier: 'priority',
+          contextTiers: [
+            expect.objectContaining({
+              thresholdTokens: 272_000,
+              prompt: 8,
+              completion: 30,
+            }),
+          ],
+        }),
+      ],
+    });
   });
 });

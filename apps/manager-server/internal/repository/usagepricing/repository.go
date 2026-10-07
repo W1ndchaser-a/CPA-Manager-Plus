@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/model"
-	sqliteutil "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/sqliteutil"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usageprojection"
+	sqliteutil "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/sqliteutil"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usage"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usageidentity"
 )
@@ -76,6 +76,7 @@ type HourlyFilter struct {
 
 type HourlyRow struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	BucketMS            int64
 	Model               string
@@ -97,6 +98,7 @@ type HourlyRow struct {
 
 type AccountRow struct {
 	usage.LongContextTokens
+	usage.BillingTokenDetails
 	usage.PricingBand
 	AccountKey           string
 	AccountSnapshot      string
@@ -626,6 +628,8 @@ func upsertHourlyBatch(ctx context.Context, tx *sql.Tx, source, revision string,
 		cache_read_tokens, cache_creation_tokens,
 		long_input_tokens, long_output_tokens, long_cached_tokens,
 		long_cache_read_tokens, long_cache_creation_tokens,
+		image_input_tokens, image_cache_read_tokens, image_output_tokens,
+		cache_creation_1h_tokens, image_tokens_known, cache_creation_ttl_known,
 		total_tokens, latency_sum_ms, latency_samples, zero_token_calls, updated_at_ms
 	)
 	select
@@ -649,6 +653,12 @@ func upsertHourlyBatch(ctx context.Context, tx *sql.Tx, source, revision string,
 		coalesce(sum(case when normalized_input_tokens_value > %d then compatible_cached_tokens_value else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		coalesce(sum(total_tokens), 0),
 		coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
 		count(nullif(latency_ms, 0)),
@@ -672,6 +682,12 @@ func upsertHourlyBatch(ctx context.Context, tx *sql.Tx, source, revision string,
 		long_cached_tokens = usage_pricing_hourly_rollups_v1.long_cached_tokens + excluded.long_cached_tokens,
 		long_cache_read_tokens = usage_pricing_hourly_rollups_v1.long_cache_read_tokens + excluded.long_cache_read_tokens,
 		long_cache_creation_tokens = usage_pricing_hourly_rollups_v1.long_cache_creation_tokens + excluded.long_cache_creation_tokens,
+		image_input_tokens = usage_pricing_hourly_rollups_v1.image_input_tokens + excluded.image_input_tokens,
+		image_cache_read_tokens = usage_pricing_hourly_rollups_v1.image_cache_read_tokens + excluded.image_cache_read_tokens,
+		image_output_tokens = usage_pricing_hourly_rollups_v1.image_output_tokens + excluded.image_output_tokens,
+		cache_creation_1h_tokens = usage_pricing_hourly_rollups_v1.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
+		image_tokens_known = min(usage_pricing_hourly_rollups_v1.image_tokens_known, excluded.image_tokens_known),
+		cache_creation_ttl_known = min(usage_pricing_hourly_rollups_v1.cache_creation_ttl_known, excluded.cache_creation_ttl_known),
 		total_tokens = usage_pricing_hourly_rollups_v1.total_tokens + excluded.total_tokens,
 		latency_sum_ms = usage_pricing_hourly_rollups_v1.latency_sum_ms + excluded.latency_sum_ms,
 		latency_samples = usage_pricing_hourly_rollups_v1.latency_samples + excluded.latency_samples,
@@ -697,8 +713,10 @@ func upsertAccountBatch(ctx context.Context, tx *sql.Tx, source, revision string
 		calls, success_calls, failure_calls, input_tokens, output_tokens,
 		reasoning_tokens, cached_tokens, cache_read_tokens, cache_creation_tokens,
 		long_input_tokens, long_output_tokens, long_cached_tokens,
-		long_cache_read_tokens, long_cache_creation_tokens, total_tokens,
-		first_seen_ms, last_seen_ms, updated_at_ms
+		long_cache_read_tokens, long_cache_creation_tokens,
+		image_input_tokens, image_cache_read_tokens, image_output_tokens,
+		cache_creation_1h_tokens, image_tokens_known, cache_creation_ttl_known,
+		total_tokens, first_seen_ms, last_seen_ms, updated_at_ms
 	)
 	select
 		?,
@@ -728,6 +746,12 @@ func upsertAccountBatch(ctx context.Context, tx *sql.Tx, source, revision string
 		coalesce(sum(case when normalized_input_tokens_value > %d then compatible_cached_tokens_value else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		coalesce(sum(total_tokens), 0),
 			min(timestamp_ms),
 			max(timestamp_ms),
@@ -761,6 +785,12 @@ func upsertAccountBatch(ctx context.Context, tx *sql.Tx, source, revision string
 		long_cached_tokens = usage_pricing_account_rollups_v1.long_cached_tokens + excluded.long_cached_tokens,
 		long_cache_read_tokens = usage_pricing_account_rollups_v1.long_cache_read_tokens + excluded.long_cache_read_tokens,
 		long_cache_creation_tokens = usage_pricing_account_rollups_v1.long_cache_creation_tokens + excluded.long_cache_creation_tokens,
+		image_input_tokens = usage_pricing_account_rollups_v1.image_input_tokens + excluded.image_input_tokens,
+		image_cache_read_tokens = usage_pricing_account_rollups_v1.image_cache_read_tokens + excluded.image_cache_read_tokens,
+		image_output_tokens = usage_pricing_account_rollups_v1.image_output_tokens + excluded.image_output_tokens,
+		cache_creation_1h_tokens = usage_pricing_account_rollups_v1.cache_creation_1h_tokens + excluded.cache_creation_1h_tokens,
+		image_tokens_known = min(usage_pricing_account_rollups_v1.image_tokens_known, excluded.image_tokens_known),
+		cache_creation_ttl_known = min(usage_pricing_account_rollups_v1.cache_creation_ttl_known, excluded.cache_creation_ttl_known),
 		total_tokens = usage_pricing_account_rollups_v1.total_tokens + excluded.total_tokens,
 		first_seen_ms = min(usage_pricing_account_rollups_v1.first_seen_ms, excluded.first_seen_ms),
 		last_seen_ms = max(usage_pricing_account_rollups_v1.last_seen_ms, excluded.last_seen_ms),
@@ -874,6 +904,8 @@ func mergeStoredHourlyRows(
 		sum(cached_tokens), sum(cache_read_tokens), sum(cache_creation_tokens),
 		sum(long_input_tokens), sum(long_output_tokens), sum(long_cached_tokens),
 		sum(long_cache_read_tokens), sum(long_cache_creation_tokens),
+		sum(image_input_tokens), sum(image_cache_read_tokens), sum(image_output_tokens),
+		sum(cache_creation_1h_tokens), min(image_tokens_known), min(cache_creation_ttl_known),
 		sum(total_tokens), sum(latency_sum_ms), sum(latency_samples), sum(zero_token_calls)
 	from usage_pricing_hourly_rollups_v1
 	where %s
@@ -959,6 +991,12 @@ func hourlyStatementFromEvents(filter HourlyFilter, fromMS, toMS, afterID int64,
 		coalesce(sum(case when normalized_input_tokens_value > %d then compatible_cached_tokens_value else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		coalesce(sum(total_tokens), 0),
 		coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
 		count(nullif(latency_ms, 0)),
@@ -980,6 +1018,7 @@ func scanAndMergeHourlyRows(rows *sql.Rows, grouped map[hourlyKey]*HourlyRow) er
 	for rows.Next() {
 		var row HourlyRow
 		var failed int
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.BucketMS,
 			&row.Model,
@@ -1000,6 +1039,12 @@ func scanAndMergeHourlyRows(rows *sql.Rows, grouped map[hourlyKey]*HourlyRow) er
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.LatencySumMS,
 			&row.LatencySamples,
@@ -1008,6 +1053,8 @@ func scanAndMergeHourlyRows(rows *sql.Rows, grouped map[hourlyKey]*HourlyRow) er
 			return err
 		}
 		row.Failed = failed != 0
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		mergeHourlyRow(grouped, row)
 	}
 	return rows.Err()
@@ -1041,6 +1088,12 @@ func mergeHourlyRow(grouped map[hourlyKey]*HourlyRow, row HourlyRow) {
 	entry.LongCachedTokens += row.LongCachedTokens
 	entry.LongCacheReadTokens += row.LongCacheReadTokens
 	entry.LongCacheCreationTokens += row.LongCacheCreationTokens
+	entry.ImageInputTokens += row.ImageInputTokens
+	entry.ImageCacheReadTokens += row.ImageCacheReadTokens
+	entry.ImageOutputTokens += row.ImageOutputTokens
+	entry.CacheCreation1hTokens += row.CacheCreation1hTokens
+	entry.ImageTokensKnown = entry.ImageTokensKnown && row.ImageTokensKnown
+	entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	entry.TotalTokens += row.TotalTokens
 	entry.LatencySumMS += row.LatencySumMS
 	entry.LatencySamples += row.LatencySamples
@@ -1155,6 +1208,8 @@ func mergeStoredAccountRows(
 		cache_read_tokens, cache_creation_tokens,
 		long_input_tokens, long_output_tokens, long_cached_tokens,
 		long_cache_read_tokens, long_cache_creation_tokens,
+		image_input_tokens, image_cache_read_tokens, image_output_tokens,
+		cache_creation_1h_tokens, image_tokens_known, cache_creation_ttl_known,
 		total_tokens, first_seen_ms, last_seen_ms, updated_at_ms
 	from usage_pricing_account_rollups_v1
 	where structure_revision = ? and account_key in (`+placeholders+`)
@@ -1222,6 +1277,12 @@ func mergeAccountRowsFromSourceArgs(
 		coalesce(sum(case when normalized_input_tokens_value > %d then compatible_cached_tokens_value else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > %d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		coalesce(sum(total_tokens), 0), min(timestamp_ms), max(timestamp_ms), 0
 	from banded_events
 	where account_key_value in (%s)
@@ -1252,6 +1313,7 @@ func mergeAccountRowsFromSourceArgs(
 func scanAndMergeAccountRows(rows *sql.Rows, grouped map[accountKey]*AccountRow) error {
 	for rows.Next() {
 		var row AccountRow
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.AccountKey,
 			&row.AccountSnapshot,
@@ -1279,6 +1341,12 @@ func scanAndMergeAccountRows(rows *sql.Rows, grouped map[accountKey]*AccountRow)
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.FirstSeenMS,
 			&row.LastSeenMS,
@@ -1286,6 +1354,8 @@ func scanAndMergeAccountRows(rows *sql.Rows, grouped map[accountKey]*AccountRow)
 		); err != nil {
 			return err
 		}
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		mergeAccountRow(grouped, row)
 	}
 	return rows.Err()
@@ -1321,6 +1391,12 @@ func mergeAccountRow(grouped map[accountKey]*AccountRow, row AccountRow) {
 	entry.LongCachedTokens += row.LongCachedTokens
 	entry.LongCacheReadTokens += row.LongCacheReadTokens
 	entry.LongCacheCreationTokens += row.LongCacheCreationTokens
+	entry.ImageInputTokens += row.ImageInputTokens
+	entry.ImageCacheReadTokens += row.ImageCacheReadTokens
+	entry.ImageOutputTokens += row.ImageOutputTokens
+	entry.CacheCreation1hTokens += row.CacheCreation1hTokens
+	entry.ImageTokensKnown = entry.ImageTokensKnown && row.ImageTokensKnown
+	entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	entry.TotalTokens += row.TotalTokens
 	if entry.FirstSeenMS == 0 || (row.FirstSeenMS > 0 && row.FirstSeenMS < entry.FirstSeenMS) {
 		entry.FirstSeenMS = row.FirstSeenMS
