@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -638,6 +639,7 @@ func NormalizeRaw(raw []byte) (Event, error) {
 	}
 	serviceTier := EffectiveServiceTier(usageContext, requestServiceTier, "", responseServiceTier)
 	cacheAccounting := NormalizeCacheAccounting(usageContext, inputTokens, cachedTokens, cacheTokens, cacheReadTokens, cacheCreationTokens)
+	billingDetails = assumeUnknownClaudeCacheWriteTTL(billingDetails, cacheCreationTokens, resolvedModel, model)
 	if totalTokens <= 0 {
 		totalTokens = cacheAccounting.TotalInputTokens + maxInt64(outputTokens, 0) + maxInt64(reasoningTokens, 0)
 	}
@@ -866,6 +868,29 @@ func readNestedThenTopInt(record map[string]any, keys []string) int64 {
 	}
 	return readFirstIntFrom(record, keys...)
 }
+
+// unknownClaudeCacheWriteTTL is the TTL assumed for Claude cache writes whose
+// producer did not report the 5-minute/1-hour split (USAGE_CLAUDE_UNKNOWN_CACHE_TTL).
+// Only "1h" changes accounting; the event stays marked as TTL-unknown.
+var unknownClaudeCacheWriteTTL = strings.ToLower(strings.TrimSpace(os.Getenv("USAGE_CLAUDE_UNKNOWN_CACHE_TTL")))
+
+func assumeUnknownClaudeCacheWriteTTL(details BillingTokenDetails, cacheCreationTokens int64, models ...string) BillingTokenDetails {
+	if unknownClaudeCacheWriteTTL != "1h" || details.CacheCreationTTLKnown || details.CacheCreation1hTokens > 0 || cacheCreationTokens <= 0 {
+		return details
+	}
+	for _, name := range models {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if index := strings.LastIndex(name, "/"); index >= 0 {
+			name = name[index+1:]
+		}
+		if strings.HasPrefix(name, "claude-") {
+			details.CacheCreation1hTokens = cacheCreationTokens
+			return details
+		}
+	}
+	return details
+}
+
 func readBillingTokenDetails(record map[string]any) BillingTokenDetails {
 	var details BillingTokenDetails
 	details.ImageInputTokens = readNestedThenTopInt(record, []string{
