@@ -304,6 +304,12 @@ func mergeStoredAccountStats(
 		sum(long_cached_tokens),
 		sum(long_cache_read_tokens),
 		sum(long_cache_creation_tokens),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		sum(total_tokens),
 		max(last_seen_ms),
 		sum(latency_sum_ms),
@@ -341,6 +347,8 @@ func mergeProjectedAccountStats(
 		p.requested_model as model, p.analytics_model, p.resolved_model, p.service_tier, p.failed,
 		p.normalized_total_input_tokens, p.output_tokens, p.cached_tokens,
 		p.cache_tokens, p.cache_read_tokens, p.cache_creation_tokens,
+		p.image_input_tokens, p.image_cache_read_tokens, p.image_output_tokens,
+		p.cache_creation_1h_tokens, p.image_tokens_known, p.cache_creation_ttl_known,
 		p.total_tokens, p.latency_ms`,
 		`e.timestamp_ms, coalesce(e.account_snapshot, ''), coalesce(e.auth_label_snapshot, ''),
 		coalesce(e.provider, ''), coalesce(e.auth_provider_snapshot, ''), coalesce(e.auth_account_id_snapshot, ''),
@@ -352,7 +360,10 @@ func mergeProjectedAccountStats(
 		coalesce(e.normalized_total_input_tokens, e.input_tokens, 0),
 		coalesce(e.output_tokens, 0), coalesce(e.cached_tokens, 0),
 		coalesce(e.cache_tokens, 0), coalesce(e.cache_read_tokens, 0),
-		coalesce(e.cache_creation_tokens, 0), coalesce(e.total_tokens, 0),
+		coalesce(e.cache_creation_tokens, 0),
+		coalesce(e.image_input_tokens, 0), coalesce(e.image_cache_read_tokens, 0), coalesce(e.image_output_tokens, 0),
+		coalesce(e.cache_creation_1h_tokens, 0), coalesce(e.image_tokens_known, 0), coalesce(e.cache_creation_ttl_known, 0),
+		coalesce(e.total_tokens, 0),
 		e.latency_ms`,
 		eventSourceOptions{
 			AfterID:            options.AfterID,
@@ -392,6 +403,12 @@ func mergeProjectedAccountStats(
 		coalesce(sum(case when normalized_input_tokens_value > ? then compatible_cached_tokens_value else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > ? then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > ? then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(coalesce(image_input_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_cache_read_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_output_tokens, 0)), 0),
+		coalesce(sum(coalesce(cache_creation_1h_tokens, 0)), 0),
+		coalesce(min(coalesce(image_tokens_known, 0)), 0),
+		coalesce(min(coalesce(cache_creation_ttl_known, 0)), 0),
 		coalesce(sum(total_tokens), 0),
 		max(timestamp_ms),
 		coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
@@ -446,6 +463,12 @@ func mergeStoredAPIKeyStats(
 		sum(long_cached_tokens),
 		sum(long_cache_read_tokens),
 		sum(long_cache_creation_tokens),
+		coalesce(sum(image_input_tokens), 0),
+		coalesce(sum(image_cache_read_tokens), 0),
+		coalesce(sum(image_output_tokens), 0),
+		coalesce(sum(cache_creation_1h_tokens), 0),
+		coalesce(min(image_tokens_known), 0),
+		coalesce(min(cache_creation_ttl_known), 0),
 		sum(total_tokens),
 		max(last_seen_ms),
 		sum(latency_sum_ms),
@@ -484,6 +507,8 @@ func mergeProjectedAPIKeyStats(
 		p.source_hash, p.requested_model as model, p.analytics_model, p.resolved_model, p.service_tier, p.failed,
 		p.normalized_total_input_tokens, p.output_tokens, p.cached_tokens,
 		p.cache_tokens, p.cache_read_tokens, p.cache_creation_tokens,
+		p.image_input_tokens, p.image_cache_read_tokens, p.image_output_tokens,
+		p.cache_creation_1h_tokens, p.image_tokens_known, p.cache_creation_ttl_known,
 		p.total_tokens, p.latency_ms`,
 		`e.timestamp_ms, coalesce(e.api_key_hash, ''), coalesce(e.account_snapshot, ''),
 		coalesce(e.auth_label_snapshot, ''), coalesce(e.provider, ''),
@@ -494,7 +519,10 @@ func mergeProjectedAPIKeyStats(
 		coalesce(e.normalized_total_input_tokens, e.input_tokens, 0),
 		coalesce(e.output_tokens, 0), coalesce(e.cached_tokens, 0),
 		coalesce(e.cache_tokens, 0), coalesce(e.cache_read_tokens, 0),
-		coalesce(e.cache_creation_tokens, 0), coalesce(e.total_tokens, 0),
+		coalesce(e.cache_creation_tokens, 0),
+		coalesce(e.image_input_tokens, 0), coalesce(e.image_cache_read_tokens, 0), coalesce(e.image_output_tokens, 0),
+		coalesce(e.cache_creation_1h_tokens, 0), coalesce(e.image_tokens_known, 0), coalesce(e.cache_creation_ttl_known, 0),
+		coalesce(e.total_tokens, 0),
 		e.latency_ms`,
 		eventSourceOptions{
 			AfterID:            afterID,
@@ -530,6 +558,12 @@ func mergeProjectedAPIKeyStats(
 		coalesce(sum(case when normalized_input_tokens_value > ? then compatible_cached_tokens_value else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > ? then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_input_tokens_value > ? then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(coalesce(image_input_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_cache_read_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_output_tokens, 0)), 0),
+		coalesce(sum(coalesce(cache_creation_1h_tokens, 0)), 0),
+		coalesce(min(coalesce(image_tokens_known, 0)), 0),
+		coalesce(min(coalesce(cache_creation_ttl_known, 0)), 0),
 		coalesce(sum(total_tokens), 0),
 		max(timestamp_ms),
 		coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
@@ -557,6 +591,7 @@ func scanAccountStats(rows *sql.Rows, grouped map[accountStatKey]*accountStatAcc
 	for rows.Next() {
 		var row AccountModelStat
 		var latencySumMS int64
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.AccountSnapshot,
 			&row.AuthLabelSnapshot,
@@ -585,6 +620,12 @@ func scanAccountStats(rows *sql.Rows, grouped map[accountStatKey]*accountStatAcc
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.LastSeenMS,
 			&latencySumMS,
@@ -592,6 +633,8 @@ func scanAccountStats(rows *sql.Rows, grouped map[accountStatKey]*accountStatAcc
 		); err != nil {
 			return err
 		}
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		row.LatencySumMS = latencySumMS
 		mergeAccountStat(grouped, row, latencySumMS)
 	}
@@ -602,6 +645,7 @@ func scanAPIKeyStats(rows *sql.Rows, grouped map[apiKeyStatKey]*apiKeyStatAccumu
 	for rows.Next() {
 		var row APIKeyModelStat
 		var latencySumMS int64
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&row.APIKeyHash,
 			&row.AccountSnapshot,
@@ -629,6 +673,12 @@ func scanAPIKeyStats(rows *sql.Rows, grouped map[apiKeyStatKey]*apiKeyStatAccumu
 			&row.LongCachedTokens,
 			&row.LongCacheReadTokens,
 			&row.LongCacheCreationTokens,
+			&row.ImageInputTokens,
+			&row.ImageCacheReadTokens,
+			&row.ImageOutputTokens,
+			&row.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&row.TotalTokens,
 			&row.LastSeenMS,
 			&latencySumMS,
@@ -636,6 +686,8 @@ func scanAPIKeyStats(rows *sql.Rows, grouped map[apiKeyStatKey]*apiKeyStatAccumu
 		); err != nil {
 			return err
 		}
+		row.ImageTokensKnown = imageKnown != 0
+		row.CacheCreationTTLKnown = ttlKnown != 0
 		mergeAPIKeyStat(grouped, row, latencySumMS)
 	}
 	return rows.Err()
@@ -714,6 +766,12 @@ func mergeAccountValues(target *AccountModelStat, row AccountModelStat) {
 	target.LongCachedTokens += row.LongCachedTokens
 	target.LongCacheReadTokens += row.LongCacheReadTokens
 	target.LongCacheCreationTokens += row.LongCacheCreationTokens
+	target.ImageInputTokens += row.ImageInputTokens
+	target.ImageCacheReadTokens += row.ImageCacheReadTokens
+	target.ImageOutputTokens += row.ImageOutputTokens
+	target.CacheCreation1hTokens += row.CacheCreation1hTokens
+	target.ImageTokensKnown = target.ImageTokensKnown && row.ImageTokensKnown
+	target.CacheCreationTTLKnown = target.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	target.TotalTokens += row.TotalTokens
 	target.LatencySumMS += row.LatencySumMS
 	target.LatencySamples += row.LatencySamples
@@ -742,6 +800,12 @@ func mergeAPIKeyValues(target *APIKeyModelStat, row APIKeyModelStat) {
 	target.LongCachedTokens += row.LongCachedTokens
 	target.LongCacheReadTokens += row.LongCacheReadTokens
 	target.LongCacheCreationTokens += row.LongCacheCreationTokens
+	target.ImageInputTokens += row.ImageInputTokens
+	target.ImageCacheReadTokens += row.ImageCacheReadTokens
+	target.ImageOutputTokens += row.ImageOutputTokens
+	target.CacheCreation1hTokens += row.CacheCreation1hTokens
+	target.ImageTokensKnown = target.ImageTokensKnown && row.ImageTokensKnown
+	target.CacheCreationTTLKnown = target.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 	target.TotalTokens += row.TotalTokens
 	target.LatencySamples += row.LatencySamples
 	if row.LastSeenMS > target.LastSeenMS {
