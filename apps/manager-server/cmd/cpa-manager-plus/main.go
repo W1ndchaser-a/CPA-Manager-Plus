@@ -24,6 +24,7 @@ import (
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/command/managerdatasnapshot"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/command/runtimeconfig"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/command/usagecompact"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/command/usagerolluprebuild"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/config"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/httpapi"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/processlock"
@@ -56,6 +57,14 @@ func main() {
 			defer stop()
 			if err := derivedmaintenance.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 				log.Printf("cleanup derived data: %v", err)
+				os.Exit(1)
+			}
+			return
+		case "rebuild-usage-rollups":
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			if err := usagerolluprebuild.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+				log.Printf("rebuild usage rollups: %v", err)
 				os.Exit(1)
 			}
 			return

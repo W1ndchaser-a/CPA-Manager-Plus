@@ -359,6 +359,19 @@ cpa-manager-plus cleanup-derived --db-path /path/to/usage.sqlite
 
 Manager Server 在整个生命周期内都会持有 `<数据库绝对路径>.manager.lock` 操作系统锁；锁仍被持有时，该命令会直接拒绝执行。因此 Web UI 只检测、解释和展示步骤，不会提供在线修复按钮、启动子进程或绕过进程锁。锁文件会持久保留，无需手工删除，应停止 Manager Server 进程后重试。符号链接别名会解析到同一个锁；具有多个硬链接的数据库会被拒绝，因为 SQLite WAL/SHM 侧车文件无法安全共享这些别名。离线维护前应备份 SQLite 和 `data.key`。该命令会创建延后的索引、替换过期派生索引、完成超大旧 quota observation group 的迁移并删除已过期的 FTS/投影 generation；它不会删除、重建或改写 authoritative `usage_events`。
 
+### 重建计费派生 rollup
+
+如果修正了历史 `usage_events` 中的缓存写入 TTL 或图片计费维度（`cache_creation_1h_tokens`、`cache_creation_ttl_known`、`image_*`），永久小时聚合、定价 rollup、监控日 rollup 以及 Dashboard/账户历史 rollup 仍保留旧值。此时应停止所有 Manager Server、备份数据库，然后执行离线重建：
+
+```bash
+cpa-manager-plus rebuild-usage-rollups --db-path /data/usage.sqlite --dry-run
+cpa-manager-plus rebuild-usage-rollups --db-path /data/usage.sqlite
+```
+
+`--dry-run` 只报告与 raw 事件不一致的投影行数量以及将被清除的派生行数量，不写入任何数据。正式执行会把存活 raw 事件的六个计费维度列同步到监控投影，清空计费派生 rollup 表并重置 checkpoint，Manager Server 重启后会以有界批次重建。该命令不会写入 `usage_events`、归档分段、归档引用、模型价格或 manager data snapshot。未知的缓存写入 TTL 仍保持未知，不会猜成 1 小时。
+
+若已删除归档 raw 事件，小时聚合和监控日 rollup 无法重新推导这些事件，命令默认拒绝执行，只有显式传入 `--allow-archived-raw` 才会继续；定价 rollup 仍可从保留的监控投影恢复这些事件。重建完成后启动 Manager Server，等待 `/status` 报告派生 rollup 就绪后再依据成本面板判断计费。
+
 完整的优化原因、实现阶段和 100k benchmark 数据见 [2026-07-10 性能优化报告](./performance-optimization-2026-07-10.md)。
 
 如果 `USAGE_QUOTA_COOLDOWN_ENABLED`、`USAGE_ACCOUNT_ACTIONS_ENABLED` 或 `USAGE_ACCOUNT_ACTIONS_AUTO_DISABLE` 由环境变量设置，面板中的对应开关会显示为环境变量来源并被锁定。要改成面板可编辑，需要移除环境变量并重启 Manager Server。

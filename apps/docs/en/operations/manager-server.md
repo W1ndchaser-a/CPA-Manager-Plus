@@ -361,6 +361,19 @@ cpa-manager-plus cleanup-derived --db-path /path/to/usage.sqlite
 
 Manager Server holds an operating-system lock at `<absolute-database-path>.manager.lock` for its entire lifetime, and the command refuses to run while that lock is held. The web UI therefore detects, explains, and shows the steps only; it does not offer an online repair button, spawn the cleanup command, or bypass the process lock. The lock file itself is persistent and does not need to be deleted; stop the Manager Server process and retry instead. Symbolic-link aliases resolve to the same lock, while databases with multiple hard links are rejected because SQLite WAL/SHM sidecars cannot safely share those aliases. Back up the SQLite database plus `data.key` before offline maintenance. The command prepares deferred indexes, replaces obsolete derived indexes, completes oversized legacy quota observation groups, and removes obsolete derived FTS/projection generations. It never deletes, rebuilds, or rewrites authoritative `usage_events`.
 
+### Rebuilding billing-derived rollups
+
+If historical `usage_events` rows were corrected for cache-write TTL or image billing dimensions (`cache_creation_1h_tokens`, `cache_creation_ttl_known`, `image_*`), the permanent hourly aggregate, pricing rollups, monitoring daily rollups, and dashboard/account-history rollups still hold the old values. Stop every Manager Server, back up the database, then run the offline rebuild:
+
+```bash
+cpa-manager-plus rebuild-usage-rollups --db-path /data/usage.sqlite --dry-run
+cpa-manager-plus rebuild-usage-rollups --db-path /data/usage.sqlite
+```
+
+`--dry-run` reports the projection rows that drifted from raw events and the number of derived rows that would be cleared. The real run copies the six billing-dimension columns from `usage_events` into the monitoring projection for live raw rows, clears the billing-derived rollup tables, and resets their checkpoints so Manager Server rebuilds them in bounded batches after restart. It never writes `usage_events`, archive segments, archive references, model prices, or manager data snapshots. Unknown cache-write TTLs stay unknown; the command does not guess a 1-hour split.
+
+If archived raw events were deleted, the hourly aggregate and monitoring daily rollups cannot re-derive them. The command refuses by default and only proceeds with `--allow-archived-raw`; the pricing rollup can still recover those events from the retained monitoring projection. Start Manager Server afterwards and wait for `/status` to report the derived rollups as ready before trusting cost dashboards.
+
 See the [July 10, 2026 Performance Optimization Report](./performance-optimization-2026-07-10.md) for the causes, delivery stages, and complete 100k benchmark evidence.
 
 When `USAGE_QUOTA_COOLDOWN_ENABLED`, `USAGE_ACCOUNT_ACTIONS_ENABLED`, or `USAGE_ACCOUNT_ACTIONS_AUTO_DISABLE` is set through the environment, the matching panel switch is shown as environment-sourced and locked. Remove the environment variable and restart Manager Server if you want the setting to be editable from the panel.
