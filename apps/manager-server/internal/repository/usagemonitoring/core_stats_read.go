@@ -11,9 +11,10 @@ import (
 )
 
 type dailyAggregateAccumulator struct {
-	value          Aggregate
-	latencySumMS   int64
-	latencySamples int64
+	value           Aggregate
+	hasContribution bool
+	latencySumMS    int64
+	latencySamples  int64
 }
 
 type dailyModelStatKey struct {
@@ -256,8 +257,17 @@ func scanAggregateContribution(row *sql.Row, accumulator *dailyAggregateAccumula
 	accumulator.value.ImageCacheReadTokens += contribution.ImageCacheReadTokens
 	accumulator.value.ImageOutputTokens += contribution.ImageOutputTokens
 	accumulator.value.CacheCreation1hTokens += contribution.CacheCreation1hTokens
-	accumulator.value.ImageTokensKnown = accumulator.value.ImageTokensKnown && contribution.ImageTokensKnown
-	accumulator.value.CacheCreationTTLKnown = accumulator.value.CacheCreationTTLKnown && contribution.CacheCreationTTLKnown
+	// The known-flag semantics are AND across contributions: a single unknown
+	// contribution makes the whole aggregate unknown. The first contribution
+	// seeds the flags because the zero value would otherwise pin them false.
+	if !accumulator.hasContribution {
+		accumulator.value.ImageTokensKnown = contribution.ImageTokensKnown
+		accumulator.value.CacheCreationTTLKnown = contribution.CacheCreationTTLKnown
+		accumulator.hasContribution = true
+	} else {
+		accumulator.value.ImageTokensKnown = accumulator.value.ImageTokensKnown && contribution.ImageTokensKnown
+		accumulator.value.CacheCreationTTLKnown = accumulator.value.CacheCreationTTLKnown && contribution.CacheCreationTTLKnown
+	}
 	accumulator.value.TotalTokens += contribution.TotalTokens
 	accumulator.value.ZeroTokenCalls += contribution.ZeroTokenCalls
 	accumulator.latencySumMS += latencySumMS

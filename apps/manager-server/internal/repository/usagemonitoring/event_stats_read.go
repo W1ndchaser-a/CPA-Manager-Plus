@@ -51,12 +51,16 @@ func (r *repository) LoadAggregate(ctx context.Context, filter AnalyticsFilter) 
 		state.CoverageEventID,
 		`p.failed, p.normalized_total_input_tokens, p.output_tokens,
 		p.reasoning_tokens, p.cached_tokens, p.cache_tokens,
-		p.cache_read_tokens, p.cache_creation_tokens, p.total_tokens,
-		p.latency_ms`,
+		p.cache_read_tokens, p.cache_creation_tokens,
+		p.image_input_tokens, p.image_cache_read_tokens, p.image_output_tokens,
+		p.cache_creation_1h_tokens, p.image_tokens_known, p.cache_creation_ttl_known,
+		p.total_tokens, p.latency_ms`,
 		`e.failed, coalesce(e.normalized_total_input_tokens, e.input_tokens, 0),
 		coalesce(e.output_tokens, 0), coalesce(e.reasoning_tokens, 0),
 		coalesce(e.cached_tokens, 0), coalesce(e.cache_tokens, 0),
 		coalesce(e.cache_read_tokens, 0), coalesce(e.cache_creation_tokens, 0),
+		coalesce(e.image_input_tokens, 0), coalesce(e.image_cache_read_tokens, 0), coalesce(e.image_output_tokens, 0),
+		coalesce(e.cache_creation_1h_tokens, 0), coalesce(e.image_tokens_known, 0), coalesce(e.cache_creation_ttl_known, 0),
 		coalesce(e.total_tokens, 0), e.latency_ms`,
 		eventSourceOptions{ProjectionComplete: projectionComplete},
 	)
@@ -71,11 +75,18 @@ func (r *repository) LoadAggregate(ctx context.Context, filter AnalyticsFilter) 
 		coalesce(sum(max(max(cached_tokens, cache_tokens) - max(cache_read_tokens, 0) - max(cache_creation_tokens, 0), 0)), 0),
 		coalesce(sum(cache_read_tokens), 0),
 		coalesce(sum(cache_creation_tokens), 0),
+		coalesce(sum(coalesce(image_input_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_cache_read_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_output_tokens, 0)), 0),
+		coalesce(sum(coalesce(cache_creation_1h_tokens, 0)), 0),
+		coalesce(min(coalesce(image_tokens_known, 0)), 0),
+		coalesce(min(coalesce(cache_creation_ttl_known, 0)), 0),
 		coalesce(sum(total_tokens), 0),
 		avg(nullif(latency_ms, 0)),
 		coalesce(sum(case when total_tokens = 0 and failed = 0 then 1 else 0 end), 0)
 	from filtered_events`, source)
 	var aggregate Aggregate
+	var imageKnown, ttlKnown int
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&aggregate.TotalCalls,
 		&aggregate.SuccessCalls,
@@ -86,12 +97,20 @@ func (r *repository) LoadAggregate(ctx context.Context, filter AnalyticsFilter) 
 		&aggregate.CachedTokens,
 		&aggregate.CacheReadTokens,
 		&aggregate.CacheCreationTokens,
+		&aggregate.ImageInputTokens,
+		&aggregate.ImageCacheReadTokens,
+		&aggregate.ImageOutputTokens,
+		&aggregate.CacheCreation1hTokens,
+		&imageKnown,
+		&ttlKnown,
 		&aggregate.TotalTokens,
 		&aggregate.AvgLatencyMS,
 		&aggregate.ZeroTokenCalls,
 	); err != nil {
 		return Aggregate{}, state, false, err
 	}
+	aggregate.ImageTokensKnown = imageKnown != 0
+	aggregate.CacheCreationTTLKnown = ttlKnown != 0
 	if err := tx.Commit(); err != nil {
 		return Aggregate{}, state, false, err
 	}
@@ -140,13 +159,18 @@ func (r *repository) LoadModelStats(ctx context.Context, filter AnalyticsFilter)
 		`p.requested_model as model, p.analytics_model, p.resolved_model, p.service_tier, p.failed,
 		p.normalized_total_input_tokens, p.output_tokens, p.reasoning_tokens,
 		p.cached_tokens, p.cache_tokens, p.cache_read_tokens,
-		p.cache_creation_tokens, p.total_tokens`,
+		p.cache_creation_tokens,
+		p.image_input_tokens, p.image_cache_read_tokens, p.image_output_tokens,
+		p.cache_creation_1h_tokens, p.image_tokens_known, p.cache_creation_ttl_known,
+		p.total_tokens`,
 		usageidentity.SQLEffectiveRequestedModelExpression("e.model", "e.requested_model")+`, `+usageidentity.SQLRequestAnalyticsModelExpression("e.model", "e.requested_model")+`, coalesce(e.resolved_model, ''),
 		coalesce(e.service_tier, ''), coalesce(e.failed, 0),
 		coalesce(e.normalized_total_input_tokens, e.input_tokens, 0),
 		coalesce(e.output_tokens, 0), coalesce(e.reasoning_tokens, 0),
 		coalesce(e.cached_tokens, 0), coalesce(e.cache_tokens, 0),
 		coalesce(e.cache_read_tokens, 0), coalesce(e.cache_creation_tokens, 0),
+		coalesce(e.image_input_tokens, 0), coalesce(e.image_cache_read_tokens, 0), coalesce(e.image_output_tokens, 0),
+		coalesce(e.cache_creation_1h_tokens, 0), coalesce(e.image_tokens_known, 0), coalesce(e.cache_creation_ttl_known, 0),
 		coalesce(e.total_tokens, 0)`,
 		eventSourceOptions{ProjectionComplete: projectionComplete},
 	)
@@ -194,6 +218,12 @@ func (r *repository) LoadModelStats(ctx context.Context, filter AnalyticsFilter)
 		coalesce(sum(case when normalized_total_input_tokens > %[3]d then max(max(cached_tokens, cache_tokens) - max(cache_read_tokens, 0) - max(cache_creation_tokens, 0), 0) else 0 end), 0),
 		coalesce(sum(case when normalized_total_input_tokens > %[3]d then cache_read_tokens else 0 end), 0),
 		coalesce(sum(case when normalized_total_input_tokens > %[3]d then cache_creation_tokens else 0 end), 0),
+		coalesce(sum(coalesce(image_input_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_cache_read_tokens, 0)), 0),
+		coalesce(sum(coalesce(image_output_tokens, 0)), 0),
+		coalesce(sum(coalesce(cache_creation_1h_tokens, 0)), 0),
+		coalesce(min(coalesce(image_tokens_known, 0)), 0),
+		coalesce(min(coalesce(cache_creation_ttl_known, 0)), 0),
 		coalesce(sum(total_tokens), 0)
 	from banded_events
 		group by analytics_model, billing_model_value, pricing_model_value,
@@ -207,6 +237,7 @@ func (r *repository) LoadModelStats(ctx context.Context, filter AnalyticsFilter)
 	stats := make([]ModelStat, 0)
 	for rows.Next() {
 		var stat ModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.Model,
 			&stat.BillingModel,
@@ -226,10 +257,18 @@ func (r *repository) LoadModelStats(ctx context.Context, filter AnalyticsFilter)
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 		); err != nil {
 			return nil, state, false, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	if err := rows.Err(); err != nil {

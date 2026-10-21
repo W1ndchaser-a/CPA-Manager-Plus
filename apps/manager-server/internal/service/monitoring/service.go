@@ -2406,11 +2406,12 @@ func channelModelStatsFromAccountStats(stats []store.AccountModelStat) []store.C
 		if entry == nil {
 			entry = &channelModelStatAccumulator{
 				row: store.ChannelModelStat{
-					PricingBand:  pricingBandFromAccountStat(stat),
-					AuthIndex:    stat.AuthIndex,
-					Model:        stat.Model,
-					BillingModel: stat.BillingModel,
-					ServiceTier:  stat.ServiceTier,
+					BillingTokenDetails: stat.BillingTokenDetails,
+					PricingBand:         pricingBandFromAccountStat(stat),
+					AuthIndex:           stat.AuthIndex,
+					Model:               stat.Model,
+					BillingModel:        stat.BillingModel,
+					ServiceTier:         stat.ServiceTier,
 				},
 			}
 			grouped[key] = entry
@@ -2446,6 +2447,12 @@ func channelModelStatsFromAccountStats(stats []store.AccountModelStat) []store.C
 		entry.row.LongCachedTokens += stat.LongCachedTokens
 		entry.row.LongCacheReadTokens += stat.LongCacheReadTokens
 		entry.row.LongCacheCreationTokens += stat.LongCacheCreationTokens
+		entry.row.ImageInputTokens += stat.ImageInputTokens
+		entry.row.ImageCacheReadTokens += stat.ImageCacheReadTokens
+		entry.row.ImageOutputTokens += stat.ImageOutputTokens
+		entry.row.CacheCreation1hTokens += stat.CacheCreation1hTokens
+		entry.row.ImageTokensKnown = entry.row.ImageTokensKnown && stat.ImageTokensKnown
+		entry.row.CacheCreationTTLKnown = entry.row.CacheCreationTTLKnown && stat.CacheCreationTTLKnown
 		entry.row.TotalTokens += stat.TotalTokens
 		if stat.LatencySamples > 0 {
 			entry.latencySumMS += stat.LatencySumMS
