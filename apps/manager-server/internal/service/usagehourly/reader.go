@@ -270,9 +270,11 @@ func floorHourMS(value int64) int64 {
 
 func coreFromRows(rows []store.UsageHourlyAggregateRow) (store.Aggregate, []store.ModelStat) {
 	agg := store.Aggregate{}
+	billingInitialized := false
 	modelStats := make(map[modelStatKey]*store.ModelStat)
 	var latencySum int64
 	for _, row := range rows {
+		mergeBillingTokenDetails(&agg.BillingTokenDetails, row.BillingTokenDetails, &billingInitialized)
 		agg.TotalCalls += row.Calls
 		if row.Failed {
 			agg.FailureCalls += row.Calls
@@ -299,6 +301,7 @@ func coreFromRows(rows []store.UsageHourlyAggregateRow) (store.Aggregate, []stor
 			successCalls = row.Calls
 		}
 		addModelStat(modelStats, store.ModelStat{
+			BillingTokenDetails: row.BillingTokenDetails,
 			Model:               row.Model,
 			BillingModel:        row.BillingModel,
 			ServiceTier:         row.ServiceTier,
@@ -348,7 +351,31 @@ func addModelStat(grouped map[modelStatKey]*store.ModelStat, stat store.ModelSta
 	entry.LongCachedTokens += stat.LongCachedTokens
 	entry.LongCacheReadTokens += stat.LongCacheReadTokens
 	entry.LongCacheCreationTokens += stat.LongCacheCreationTokens
+	entry.ImageInputTokens += stat.ImageInputTokens
+	entry.ImageCacheReadTokens += stat.ImageCacheReadTokens
+	entry.ImageOutputTokens += stat.ImageOutputTokens
+	entry.CacheCreation1hTokens += stat.CacheCreation1hTokens
+	entry.ImageTokensKnown = entry.ImageTokensKnown && stat.ImageTokensKnown
+	entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && stat.CacheCreationTTLKnown
 	entry.TotalTokens += stat.TotalTokens
+}
+
+// mergeBillingTokenDetails folds one row's billing dimensions into a running
+// aggregate. Known flags start from the first contribution and are ANDed
+// afterwards so an unknown TTL or image split is never upgraded to known.
+func mergeBillingTokenDetails(target *usage.BillingTokenDetails, source usage.BillingTokenDetails, initialized *bool) {
+	target.ImageInputTokens += source.ImageInputTokens
+	target.ImageCacheReadTokens += source.ImageCacheReadTokens
+	target.ImageOutputTokens += source.ImageOutputTokens
+	target.CacheCreation1hTokens += source.CacheCreation1hTokens
+	if !*initialized {
+		target.ImageTokensKnown = source.ImageTokensKnown
+		target.CacheCreationTTLKnown = source.CacheCreationTTLKnown
+		*initialized = true
+		return
+	}
+	target.ImageTokensKnown = target.ImageTokensKnown && source.ImageTokensKnown
+	target.CacheCreationTTLKnown = target.CacheCreationTTLKnown && source.CacheCreationTTLKnown
 }
 
 func sortedModelStats(grouped map[modelStatKey]*store.ModelStat) []store.ModelStat {
@@ -387,6 +414,7 @@ func modelStatsFromPricingRows(rows []store.UsagePricingHourlyRow) []store.Model
 		addModelStat(grouped, store.ModelStat{
 			LongContextTokens:   row.LongContextTokens,
 			PricingBand:         row.PricingBand,
+			BillingTokenDetails: row.BillingTokenDetails,
 			Model:               row.Model,
 			BillingModel:        row.BillingModel,
 			ServiceTier:         row.ServiceTier,
@@ -409,8 +437,18 @@ func dashboardTimelineFromRows(rows []store.UsageHourlyAggregateRow) []store.Tim
 	for _, row := range rows {
 		point := grouped[row.BucketMS]
 		if point == nil {
-			point = &store.TimelinePoint{BucketMS: row.BucketMS}
+			point = &store.TimelinePoint{
+				BucketMS:            row.BucketMS,
+				BillingTokenDetails: row.BillingTokenDetails,
+			}
 			grouped[row.BucketMS] = point
+		} else {
+			point.ImageInputTokens += row.ImageInputTokens
+			point.ImageCacheReadTokens += row.ImageCacheReadTokens
+			point.ImageOutputTokens += row.ImageOutputTokens
+			point.CacheCreation1hTokens += row.CacheCreation1hTokens
+			point.ImageTokensKnown = point.ImageTokensKnown && row.ImageTokensKnown
+			point.CacheCreationTTLKnown = point.CacheCreationTTLKnown && row.CacheCreationTTLKnown
 		}
 		point.Calls += row.Calls
 		point.Tokens += row.TotalTokens
@@ -434,6 +472,7 @@ func analyticsTimelineFromPricingRows(rows []store.UsagePricingHourlyRow, granul
 		point := store.TimelinePoint{
 			LongContextTokens:   row.LongContextTokens,
 			PricingBand:         row.PricingBand,
+			BillingTokenDetails: row.BillingTokenDetails,
 			BucketMS:            usage.AnalyticsBucketMS(row.BucketMS, granularity, location),
 			Model:               row.Model,
 			BillingModel:        row.BillingModel,
@@ -490,6 +529,12 @@ func addAnalyticsTimelinePoint(grouped map[analyticsTimelineKey]*analyticsTimeli
 	entry.point.LongCachedTokens += point.LongCachedTokens
 	entry.point.LongCacheReadTokens += point.LongCacheReadTokens
 	entry.point.LongCacheCreationTokens += point.LongCacheCreationTokens
+	entry.point.ImageInputTokens += point.ImageInputTokens
+	entry.point.ImageCacheReadTokens += point.ImageCacheReadTokens
+	entry.point.ImageOutputTokens += point.ImageOutputTokens
+	entry.point.CacheCreation1hTokens += point.CacheCreation1hTokens
+	entry.point.ImageTokensKnown = entry.point.ImageTokensKnown && point.ImageTokensKnown
+	entry.point.CacheCreationTTLKnown = entry.point.CacheCreationTTLKnown && point.CacheCreationTTLKnown
 	entry.point.LatencySamples += point.LatencySamples
 	entry.latencySumMS += latencySumMS
 }

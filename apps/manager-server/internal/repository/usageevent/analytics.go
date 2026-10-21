@@ -510,6 +510,12 @@ func (r *repository) AggregateWithFilter(ctx context.Context, filter AnalyticsFi
 	coalesce(sum(`+compatCachedExpr+`), 0),
 	coalesce(sum(cache_read_tokens), 0),
 	coalesce(sum(cache_creation_tokens), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	avg(nullif(latency_ms, 0)),
 	coalesce(sum(case when total_tokens = 0 and failed = 0 then 1 else 0 end), 0)
@@ -517,6 +523,7 @@ from usage_events `+where, args...)
 
 	var agg Aggregate
 	var success, failure sql.NullInt64
+	var imageKnown, ttlKnown int
 	if err := row.Scan(
 		&agg.TotalCalls,
 		&success,
@@ -527,6 +534,12 @@ from usage_events `+where, args...)
 		&agg.CachedTokens,
 		&agg.CacheReadTokens,
 		&agg.CacheCreationTokens,
+		&agg.ImageInputTokens,
+		&agg.ImageCacheReadTokens,
+		&agg.ImageOutputTokens,
+		&agg.CacheCreation1hTokens,
+		&imageKnown,
+		&ttlKnown,
 		&agg.TotalTokens,
 		&agg.AvgLatencyMS,
 		&agg.ZeroTokenCalls,
@@ -535,6 +548,8 @@ from usage_events `+where, args...)
 	}
 	agg.SuccessCalls = success.Int64
 	agg.FailureCalls = failure.Int64
+	agg.ImageTokensKnown = imageKnown != 0
+	agg.CacheCreationTTLKnown = ttlKnown != 0
 	return agg, nil
 }
 
@@ -560,6 +575,12 @@ select
 	coalesce(sum(` + longCachedExpr + `), 0),
 	coalesce(sum(` + longCacheReadExpr + `), 0),
 	coalesce(sum(` + longCacheCreationExpr + `), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0)
 from banded_usage_events ` + where + `
 group by analytics_model_value, billing_model, pricing_model_value, context_threshold_tokens_value, coalesce(service_tier, '')
@@ -594,6 +615,12 @@ select
 	coalesce(sum(` + longCachedFExpr + `), 0),
 	coalesce(sum(` + longCacheReadFExpr + `), 0),
 	coalesce(sum(` + longCacheCreationFExpr + `), 0),
+	coalesce(sum(f.image_input_tokens), 0),
+	coalesce(sum(f.image_cache_read_tokens), 0),
+	coalesce(sum(f.image_output_tokens), 0),
+	coalesce(sum(f.cache_creation_1h_tokens), 0),
+	coalesce(min(f.image_tokens_known), 0),
+	coalesce(min(f.cache_creation_ttl_known), 0),
 	coalesce(sum(f.total_tokens), 0)
 from filtered f
 join top_models t on t.model = f.analytics_model_value
@@ -610,6 +637,7 @@ order by max(t.model_calls) desc, f.analytics_model_value, calls desc`
 	stats := make([]ModelStat, 0)
 	for rows.Next() {
 		var stat ModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.Model,
 			&stat.BillingModel,
@@ -629,10 +657,18 @@ order by max(t.model_calls) desc, f.analytics_model_value, calls desc`
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	return stats, rows.Err()
@@ -655,6 +691,12 @@ select
 	`+compatCachedExpr+`,
 	cache_read_tokens,
 	cache_creation_tokens,
+	coalesce(image_input_tokens, 0),
+	coalesce(image_cache_read_tokens, 0),
+	coalesce(image_output_tokens, 0),
+	coalesce(cache_creation_1h_tokens, 0),
+	coalesce(image_tokens_known, 0),
+	coalesce(cache_creation_ttl_known, 0),
 	total_tokens,
 	latency_ms
 from banded_usage_events %s
@@ -691,6 +733,8 @@ order by timestamp_ms, analytics_model_value`, where)
 		var cacheReadTokens int64
 		var cacheCreationTokens int64
 		var totalTokens int64
+		var dims usage.BillingTokenDetails
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&timestampMS,
 			&model,
@@ -705,11 +749,19 @@ order by timestamp_ms, analytics_model_value`, where)
 			&cachedTokens,
 			&cacheReadTokens,
 			&cacheCreationTokens,
+			&dims.ImageInputTokens,
+			&dims.ImageCacheReadTokens,
+			&dims.ImageOutputTokens,
+			&dims.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&totalTokens,
 			&latency,
 		); err != nil {
 			return nil, err
 		}
+		dims.ImageTokensKnown = imageKnown != 0
+		dims.CacheCreationTTLKnown = ttlKnown != 0
 		mapKey := key{
 			bucketMS:               usage.AnalyticsBucketMS(timestampMS, granularity, location),
 			model:                  model,
@@ -721,6 +773,7 @@ order by timestamp_ms, analytics_model_value`, where)
 		point := grouped[mapKey]
 		if point == nil {
 			point = &TimelinePoint{
+				BillingTokenDetails: dims,
 				PricingBand: usage.PricingBand{
 					PricingModel:           pricingModel,
 					ContextThresholdTokens: contextThresholdTokens,
@@ -732,6 +785,13 @@ order by timestamp_ms, analytics_model_value`, where)
 			}
 			grouped[mapKey] = point
 			order = append(order, mapKey)
+		} else {
+			point.ImageInputTokens += dims.ImageInputTokens
+			point.ImageCacheReadTokens += dims.ImageCacheReadTokens
+			point.ImageOutputTokens += dims.ImageOutputTokens
+			point.CacheCreation1hTokens += dims.CacheCreation1hTokens
+			point.ImageTokensKnown = point.ImageTokensKnown && dims.ImageTokensKnown
+			point.CacheCreationTTLKnown = point.CacheCreationTTLKnown && dims.CacheCreationTTLKnown
 		}
 		point.Calls += 1
 		point.Tokens += totalTokens
@@ -788,6 +848,12 @@ select
 	`+compatCachedExpr+`,
 	cache_read_tokens,
 	cache_creation_tokens,
+	coalesce(image_input_tokens, 0),
+	coalesce(image_cache_read_tokens, 0),
+	coalesce(image_output_tokens, 0),
+	coalesce(cache_creation_1h_tokens, 0),
+	coalesce(image_tokens_known, 0),
+	coalesce(cache_creation_ttl_known, 0),
 	total_tokens,
 	latency_ms
 from banded_usage_events %s
@@ -815,6 +881,7 @@ order by timestamp_ms, api_key_hash, analytics_model_value`, where)
 		var failed int
 		var latency sql.NullFloat64
 		var totalTokens int64
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&timestampMS,
 			&point.APIKeyHash,
@@ -830,11 +897,19 @@ order by timestamp_ms, api_key_hash, analytics_model_value`, where)
 			&point.CachedTokens,
 			&point.CacheReadTokens,
 			&point.CacheCreationTokens,
+			&point.ImageInputTokens,
+			&point.ImageCacheReadTokens,
+			&point.ImageOutputTokens,
+			&point.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&totalTokens,
 			&latency,
 		); err != nil {
 			return nil, err
 		}
+		point.ImageTokensKnown = imageKnown != 0
+		point.CacheCreationTTLKnown = ttlKnown != 0
 		mapKey := key{
 			apiKeyHash:             point.APIKeyHash,
 			bucketMS:               usage.AnalyticsBucketMS(timestampMS, granularity, location),
@@ -847,15 +922,23 @@ order by timestamp_ms, api_key_hash, analytics_model_value`, where)
 		entry := grouped[mapKey]
 		if entry == nil {
 			entry = &APIKeyTimelinePoint{
-				PricingBand:  point.PricingBand,
-				APIKeyHash:   point.APIKeyHash,
-				BucketMS:     mapKey.bucketMS,
-				Model:        point.Model,
-				BillingModel: point.BillingModel,
-				ServiceTier:  point.ServiceTier,
+				BillingTokenDetails: point.BillingTokenDetails,
+				PricingBand:         point.PricingBand,
+				APIKeyHash:          point.APIKeyHash,
+				BucketMS:            mapKey.bucketMS,
+				Model:               point.Model,
+				BillingModel:        point.BillingModel,
+				ServiceTier:         point.ServiceTier,
 			}
 			grouped[mapKey] = entry
 			order = append(order, mapKey)
+		} else {
+			entry.ImageInputTokens += point.ImageInputTokens
+			entry.ImageCacheReadTokens += point.ImageCacheReadTokens
+			entry.ImageOutputTokens += point.ImageOutputTokens
+			entry.CacheCreation1hTokens += point.CacheCreation1hTokens
+			entry.ImageTokensKnown = entry.ImageTokensKnown && point.ImageTokensKnown
+			entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && point.CacheCreationTTLKnown
 		}
 		entry.Calls += 1
 		entry.Tokens += totalTokens
@@ -1291,6 +1374,12 @@ select
 	`+compatCachedExpr+`,
 	cache_read_tokens,
 	cache_creation_tokens,
+	coalesce(image_input_tokens, 0),
+	coalesce(image_cache_read_tokens, 0),
+	coalesce(image_output_tokens, 0),
+	coalesce(cache_creation_1h_tokens, 0),
+	coalesce(image_tokens_known, 0),
+	coalesce(cache_creation_ttl_known, 0),
 	total_tokens
 from banded_usage_events `+where+`
 order by timestamp_ms, model`, args...)
@@ -1331,6 +1420,8 @@ order by timestamp_ms, model`, args...)
 		var cacheReadTokens int64
 		var cacheCreationTokens int64
 		var totalTokens int64
+		var dims usage.BillingTokenDetails
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&timestampMS,
 			&model,
@@ -1346,10 +1437,18 @@ order by timestamp_ms, model`, args...)
 			&cachedTokens,
 			&cacheReadTokens,
 			&cacheCreationTokens,
+			&dims.ImageInputTokens,
+			&dims.ImageCacheReadTokens,
+			&dims.ImageOutputTokens,
+			&dims.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&totalTokens,
 		); err != nil {
 			return nil, err
 		}
+		dims.ImageTokensKnown = imageKnown != 0
+		dims.CacheCreationTTLKnown = ttlKnown != 0
 		tm := time.UnixMilli(timestampMS).In(location)
 		mapKey := key{
 			weekday:                int(tm.Weekday()),
@@ -1365,6 +1464,7 @@ order by timestamp_ms, model`, args...)
 		point := grouped[mapKey]
 		if point == nil {
 			point = &HeatmapPoint{
+				BillingTokenDetails: dims,
 				PricingBand: usage.PricingBand{
 					PricingModel:           pricingModel,
 					ContextThresholdTokens: contextThresholdTokens,
@@ -1379,6 +1479,13 @@ order by timestamp_ms, model`, args...)
 			}
 			grouped[mapKey] = point
 			order = append(order, mapKey)
+		} else {
+			point.ImageInputTokens += dims.ImageInputTokens
+			point.ImageCacheReadTokens += dims.ImageCacheReadTokens
+			point.ImageOutputTokens += dims.ImageOutputTokens
+			point.CacheCreation1hTokens += dims.CacheCreation1hTokens
+			point.ImageTokensKnown = point.ImageTokensKnown && dims.ImageTokensKnown
+			point.CacheCreationTTLKnown = point.CacheCreationTTLKnown && dims.CacheCreationTTLKnown
 		}
 		point.Calls += 1
 		if failed != 0 {
@@ -1432,6 +1539,12 @@ select
 	coalesce(sum(`+longCachedExpr+`), 0),
 	coalesce(sum(`+longCacheReadExpr+`), 0),
 	coalesce(sum(`+longCacheCreationExpr+`), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	avg(nullif(latency_ms, 0)),
 	count(nullif(latency_ms, 0))
@@ -1446,6 +1559,7 @@ order by count(*) desc`, args...)
 	stats := make([]ChannelModelStat, 0)
 	for rows.Next() {
 		var stat ChannelModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.AuthIndex,
 			&stat.Source,
@@ -1471,12 +1585,20 @@ order by count(*) desc`, args...)
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 			&stat.AvgLatencyMS,
 			&stat.LatencySamples,
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	return stats, rows.Err()
@@ -1557,6 +1679,12 @@ select
 	coalesce(sum(`+longCachedExpr+`), 0),
 	coalesce(sum(`+longCacheReadExpr+`), 0),
 	coalesce(sum(`+longCacheCreationExpr+`), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	max(timestamp_ms),
 	coalesce(sum(case when latency_ms is not null and latency_ms != 0 then latency_ms else 0 end), 0),
@@ -1573,6 +1701,7 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 	stats := make([]AccountModelStat, 0)
 	for rows.Next() {
 		var stat AccountModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.AccountSnapshot,
 			&stat.AuthLabelSnapshot,
@@ -1601,6 +1730,12 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 			&stat.LastSeenMS,
 			&stat.LatencySumMS,
@@ -1609,6 +1744,8 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	return stats, rows.Err()
@@ -1668,6 +1805,12 @@ select
 	coalesce(sum(`+longCachedExpr+`), 0),
 	coalesce(sum(`+longCacheReadExpr+`), 0),
 	coalesce(sum(`+longCacheCreationExpr+`), 0),
+	coalesce(sum(e.image_input_tokens), 0),
+	coalesce(sum(e.image_cache_read_tokens), 0),
+	coalesce(sum(e.image_output_tokens), 0),
+	coalesce(sum(e.cache_creation_1h_tokens), 0),
+	coalesce(min(e.image_tokens_known), 0),
+	coalesce(min(e.cache_creation_ttl_known), 0),
 	coalesce(sum(e.total_tokens), 0),
 	max(e.timestamp_ms)
 from window_targets w
@@ -1683,6 +1826,7 @@ order by w.request_index, max(e.timestamp_ms) desc`, args...)
 	stats := make([]AccountWindowModelStat, 0)
 	for rows.Next() {
 		var stat AccountWindowModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.RequestIndex,
 			&stat.Model,
@@ -1703,11 +1847,19 @@ order by w.request_index, max(e.timestamp_ms) desc`, args...)
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 			&stat.LastSeenMS,
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	if err := rows.Close(); err != nil {
@@ -1883,6 +2035,12 @@ select
 	coalesce(sum(`+longCachedExpr+`), 0),
 	coalesce(sum(`+longCacheReadExpr+`), 0),
 	coalesce(sum(`+longCacheCreationExpr+`), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	max(timestamp_ms),
 	avg(nullif(latency_ms, 0)),
@@ -1898,6 +2056,7 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 	stats := make([]CredentialModelStat, 0)
 	for rows.Next() {
 		var stat CredentialModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.ID,
 			&stat.AuthFileSnapshot,
@@ -1927,6 +2086,12 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 			&stat.LastSeenMS,
 			&stat.AvgLatencyMS,
@@ -1934,6 +2099,8 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stat.AuthProjectIDSnapshot = usageidentity.ProjectIDSnapshot(
 			stat.AuthProviderSnapshot,
 			stat.AuthProjectIDSnapshot,
@@ -2006,6 +2173,12 @@ select
 	`+compatCachedExpr+`,
 	cache_read_tokens,
 	cache_creation_tokens,
+	coalesce(image_input_tokens, 0),
+	coalesce(image_cache_read_tokens, 0),
+	coalesce(image_output_tokens, 0),
+	coalesce(cache_creation_1h_tokens, 0),
+	coalesce(image_tokens_known, 0),
+	coalesce(cache_creation_ttl_known, 0),
 	total_tokens,
 	latency_ms
 from banded_usage_events %s
@@ -2036,6 +2209,7 @@ from banded_usage_events %s
 		var failed int
 		var latency sql.NullFloat64
 		var totalTokens int64
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&timestampMS,
 			&point.ID,
@@ -2060,11 +2234,19 @@ from banded_usage_events %s
 			&point.CachedTokens,
 			&point.CacheReadTokens,
 			&point.CacheCreationTokens,
+			&point.ImageInputTokens,
+			&point.ImageCacheReadTokens,
+			&point.ImageOutputTokens,
+			&point.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&totalTokens,
 			&latency,
 		); err != nil {
 			return nil, err
 		}
+		point.ImageTokensKnown = imageKnown != 0
+		point.CacheCreationTTLKnown = ttlKnown != 0
 		point.AuthProjectIDSnapshot = usageidentity.ProjectIDSnapshot(
 			point.AuthProviderSnapshot,
 			point.AuthProjectIDSnapshot,
@@ -2085,6 +2267,7 @@ from banded_usage_events %s
 		entry := grouped[mapKey]
 		if entry == nil {
 			entry = &CredentialTimelinePoint{
+				BillingTokenDetails:   point.BillingTokenDetails,
 				PricingBand:           point.PricingBand,
 				ID:                    point.ID,
 				AuthFileSnapshot:      point.AuthFileSnapshot,
@@ -2103,6 +2286,13 @@ from banded_usage_events %s
 			}
 			grouped[mapKey] = entry
 			order = append(order, mapKey)
+		} else {
+			entry.ImageInputTokens += point.ImageInputTokens
+			entry.ImageCacheReadTokens += point.ImageCacheReadTokens
+			entry.ImageOutputTokens += point.ImageOutputTokens
+			entry.CacheCreation1hTokens += point.CacheCreation1hTokens
+			entry.ImageTokensKnown = entry.ImageTokensKnown && point.ImageTokensKnown
+			entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && point.CacheCreationTTLKnown
 		}
 		entry.Calls += 1
 		entry.Tokens += totalTokens
@@ -2192,6 +2382,12 @@ func (r *repository) credentialTimelineHourlyWithFilter(ctx context.Context, fil
 	coalesce(sum(` + longCachedExpr + `), 0),
 	coalesce(sum(` + longCacheReadExpr + `), 0),
 	coalesce(sum(` + longCacheCreationExpr + `), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	avg(case when latency_ms > 0 then latency_ms end),
 	count(case when latency_ms > 0 then 1 end)
 ` + queryFrom + where + `
@@ -2211,6 +2407,7 @@ group by ` + bucketExpr + `, credential_id,
 	points := make([]CredentialTimelinePoint, 0)
 	for rows.Next() {
 		var point CredentialTimelinePoint
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&point.BucketMS,
 			&point.ID,
@@ -2243,11 +2440,19 @@ group by ` + bucketExpr + `, credential_id,
 			&point.LongCachedTokens,
 			&point.LongCacheReadTokens,
 			&point.LongCacheCreationTokens,
+			&point.ImageInputTokens,
+			&point.ImageCacheReadTokens,
+			&point.ImageOutputTokens,
+			&point.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&point.AvgLatencyMS,
 			&point.LatencySamples,
 		); err != nil {
 			return nil, err
 		}
+		point.ImageTokensKnown = imageKnown != 0
+		point.CacheCreationTTLKnown = ttlKnown != 0
 		point.AuthProjectIDSnapshot = usageidentity.ProjectIDSnapshot(
 			point.AuthProviderSnapshot,
 			point.AuthProjectIDSnapshot,
@@ -2366,6 +2571,12 @@ func mergeCredentialTimelineParts(parts [][]CredentialTimelinePoint) []Credentia
 			entry.LongCachedTokens += point.LongCachedTokens
 			entry.LongCacheReadTokens += point.LongCacheReadTokens
 			entry.LongCacheCreationTokens += point.LongCacheCreationTokens
+			entry.ImageInputTokens += point.ImageInputTokens
+			entry.ImageCacheReadTokens += point.ImageCacheReadTokens
+			entry.ImageOutputTokens += point.ImageOutputTokens
+			entry.CacheCreation1hTokens += point.CacheCreation1hTokens
+			entry.ImageTokensKnown = entry.ImageTokensKnown && point.ImageTokensKnown
+			entry.CacheCreationTTLKnown = entry.CacheCreationTTLKnown && point.CacheCreationTTLKnown
 			entry.LatencySamples += point.LatencySamples
 			entry.AvgLatencyMS.Valid = entry.LatencySamples > 0
 			if entry.AvgLatencyMS.Valid {
@@ -2410,6 +2621,12 @@ select
 	coalesce(sum(`+longCachedExpr+`), 0),
 	coalesce(sum(`+longCacheReadExpr+`), 0),
 	coalesce(sum(`+longCacheCreationExpr+`), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	max(timestamp_ms),
 	avg(nullif(latency_ms, 0)),
@@ -2425,6 +2642,7 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 	stats := make([]APIKeyModelStat, 0)
 	for rows.Next() {
 		var stat APIKeyModelStat
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&stat.APIKeyHash,
 			&stat.AccountSnapshot,
@@ -2452,6 +2670,12 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 			&stat.LongCachedTokens,
 			&stat.LongCacheReadTokens,
 			&stat.LongCacheCreationTokens,
+			&stat.ImageInputTokens,
+			&stat.ImageCacheReadTokens,
+			&stat.ImageOutputTokens,
+			&stat.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&stat.TotalTokens,
 			&stat.LastSeenMS,
 			&stat.AvgLatencyMS,
@@ -2459,6 +2683,8 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 		); err != nil {
 			return nil, err
 		}
+		stat.ImageTokensKnown = imageKnown != 0
+		stat.CacheCreationTTLKnown = ttlKnown != 0
 		stats = append(stats, stat)
 	}
 	return stats, rows.Err()
@@ -2483,6 +2709,12 @@ func (r *repository) TaskBucketsWithFilter(ctx context.Context, filter Analytics
 	coalesce(sum(`+compatCachedExpr+`), 0),
 	coalesce(sum(cache_read_tokens), 0),
 	coalesce(sum(cache_creation_tokens), 0),
+	coalesce(sum(image_input_tokens), 0),
+	coalesce(sum(image_cache_read_tokens), 0),
+	coalesce(sum(image_output_tokens), 0),
+	coalesce(sum(cache_creation_1h_tokens), 0),
+	coalesce(min(image_tokens_known), 0),
+	coalesce(min(cache_creation_ttl_known), 0),
 	coalesce(sum(total_tokens), 0),
 	avg(nullif(latency_ms, 0)),
 	max(latency_ms)
@@ -2498,6 +2730,7 @@ limit 500`, args...)
 	buckets := make([]TaskBucket, 0)
 	for rows.Next() {
 		var bucket TaskBucket
+		var imageKnown, ttlKnown int
 		if err := rows.Scan(
 			&bucket.BucketKey,
 			&bucket.Total,
@@ -2515,12 +2748,20 @@ limit 500`, args...)
 			&bucket.CachedTokens,
 			&bucket.CacheReadTokens,
 			&bucket.CacheCreationTokens,
+			&bucket.ImageInputTokens,
+			&bucket.ImageCacheReadTokens,
+			&bucket.ImageOutputTokens,
+			&bucket.CacheCreation1hTokens,
+			&imageKnown,
+			&ttlKnown,
 			&bucket.TotalTokens,
 			&bucket.AvgLatencyMS,
 			&bucket.MaxLatencyMS,
 		); err != nil {
 			return nil, err
 		}
+		bucket.ImageTokensKnown = imageKnown != 0
+		bucket.CacheCreationTTLKnown = ttlKnown != 0
 		buckets = append(buckets, bucket)
 	}
 	return buckets, rows.Err()

@@ -303,3 +303,121 @@ func TestBillingDimensionsRetainedProjectionRebuild(t *testing.T) {
 			imgIn, imgRead, imgOut, ttl1h, imgKnown, ttlKnown)
 	}
 }
+
+// The filtered analytics reads used by summary/model/timeline panels must carry
+// the same billing dimensions as the unfiltered core reads. Otherwise the same
+// window prices differently depending on which query path served it.
+func TestBillingDimensionsRawFilteredAnalyticsMatchCoreReads(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	repo := usageevent.New(db)
+
+	rawKnown := []byte(`{
+		"request_id": "dims-known",
+		"timestamp": "2026-10-08T12:00:00Z",
+		"model": "claude-known",
+		"tokens": {
+			"input_tokens": 1000,
+			"output_tokens": 100,
+			"cache_read_tokens": 200,
+			"cache_creation_tokens": 300,
+			"cache_creation_1h_tokens": 120,
+			"image_input_tokens": 40,
+			"image_cache_read_tokens": 10,
+			"image_output_tokens": 5,
+			"image_tokens_known": true,
+			"cache_creation_ttl_known": true,
+			"total_tokens": 1100
+		}
+	}`)
+	rawUnknown := []byte(`{
+		"request_id": "dims-unknown",
+		"timestamp": "2026-10-08T12:30:00Z",
+		"model": "claude-unknown",
+		"tokens": {
+			"input_tokens": 1000,
+			"output_tokens": 100,
+			"cache_read_tokens": 200,
+			"cache_creation_tokens": 300,
+			"image_input_tokens": 40,
+			"image_cache_read_tokens": 10,
+			"image_output_tokens": 5,
+			"image_tokens_known": false,
+			"cache_creation_ttl_known": false,
+			"total_tokens": 1100
+		}
+	}`)
+
+	events := make([]model.UsageEvent, 0, 2)
+	for _, raw := range [][]byte{rawKnown, rawUnknown} {
+		event, err := usage.NormalizeRaw(raw)
+		if err != nil {
+			t.Fatalf("normalize raw event: %v", err)
+		}
+		events = append(events, event)
+	}
+	if _, err := repo.InsertBatch(ctx, events); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+	fromMS := events[0].TimestampMS - 1
+	toMS := events[1].TimestampMS + 1
+
+	coreStats, err := repo.ModelStatsBetween(ctx, fromMS, toMS)
+	if err != nil {
+		t.Fatalf("core model stats: %v", err)
+	}
+	filteredStats, err := repo.ModelStatsWithFilter(ctx, usageevent.AnalyticsFilter{
+		FromMS:        fromMS,
+		ToMS:          toMS,
+		IncludeFailed: true,
+	}, 0)
+	if err != nil {
+		t.Fatalf("filtered model stats: %v", err)
+	}
+	coreDims := map[string]usage.BillingTokenDetails{}
+	for _, stat := range coreStats {
+		coreDims[stat.Model] = stat.BillingTokenDetails
+	}
+	if len(coreDims) != 2 {
+		t.Fatalf("expected two core models, got %#v", coreDims)
+	}
+	for _, stat := range filteredStats {
+		if got, ok := coreDims[stat.Model]; !ok || got != stat.BillingTokenDetails {
+			t.Fatalf("filtered dims for %s = %#v, want %#v", stat.Model, stat.BillingTokenDetails, got)
+		}
+	}
+	known := coreDims["claude-known"]
+	unknown := coreDims["claude-unknown"]
+	if known.CacheCreation1hTokens != 120 || !known.CacheCreationTTLKnown || !known.ImageTokensKnown {
+		t.Fatalf("known dims lost: %#v", known)
+	}
+	if unknown.CacheCreation1hTokens != 0 || unknown.CacheCreationTTLKnown || unknown.ImageTokensKnown {
+		t.Fatalf("unknown dims upgraded: %#v", unknown)
+	}
+
+	timeline, err := repo.TimelineWithFilter(ctx, usageevent.AnalyticsFilter{
+		FromMS:        fromMS,
+		ToMS:          toMS,
+		IncludeFailed: true,
+	}, "hour", time.UTC)
+	if err != nil {
+		t.Fatalf("timeline: %v", err)
+	}
+	var timeline1h, timelineCacheCreation int64
+	var timelineKnown bool
+	for index, point := range timeline {
+		timeline1h += point.CacheCreation1hTokens
+		timelineCacheCreation += point.CacheCreationTokens
+		if index == 0 {
+			timelineKnown = point.CacheCreationTTLKnown
+		} else {
+			timelineKnown = timelineKnown && point.CacheCreationTTLKnown
+		}
+	}
+	if timeline1h != 120 || timelineCacheCreation != 600 {
+		t.Fatalf("timeline dims = 1h %d creation %d, want 120/600", timeline1h, timelineCacheCreation)
+	}
+	if timelineKnown {
+		t.Fatal("timeline merged an unknown TTL into a known one")
+	}
+}
